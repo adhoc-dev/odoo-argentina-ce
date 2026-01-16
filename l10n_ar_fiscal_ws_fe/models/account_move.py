@@ -7,10 +7,9 @@ import json
 import logging
 from datetime import datetime
 
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from odoo.tools import float_repr
-
-from odoo import _, api, fields, models
 
 base64.encodestring = base64.encodebytes
 

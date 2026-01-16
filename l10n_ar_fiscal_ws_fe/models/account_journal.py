@@ -4,10 +4,9 @@
 ##############################################################################
 import logging
 
+from odoo import _, api, fields, models
 from odoo.addons.l10n_ar_fiscal_ws.models.exceptions import ArcaError
 from odoo.exceptions import UserError
-
-from odoo import _, api, fields, models
 
 _logger = logging.getLogger(__name__)
 
