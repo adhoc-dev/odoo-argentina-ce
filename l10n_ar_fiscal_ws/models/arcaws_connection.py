@@ -4,10 +4,12 @@
 ##############################################################################
 import logging
 
+from lxml import etree
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 from odoo.tools.safe_eval import safe_eval
 from zeep import Client
+from zeep.plugins import HistoryPlugin
 
 _logger = logging.getLogger(__name__)
 
@@ -104,15 +106,22 @@ class ArcawsConnection(models.Model):
 
     def call_arca_service(self, method_name, data, **kwargs):
         self.ensure_one()
+        history = HistoryPlugin()
         _logger.info(f"Calling ARCA service {method_name}")
         if "auth" in kwargs:
             data.update(self._arba_get_auth_dict(kwargs["auth"]))
             del kwargs["auth"]
         try:
-            client = Client(self.arcaws_url)
+            client = Client(self.arcaws_url, plugins=[history])
             response = getattr(client.service, method_name)(**data, **kwargs)
         except Exception as error:
             raise UserError(f"Error calling ARCA service {method_name}: {error}")
+        if history.last_sent:
+            envelope_req = history.last_sent["envelope"]
+            response.xml_request = etree.tostring(envelope_req, pretty_print=True, encoding="unicode")
+        if history.last_received:
+            envelope_req = history.last_received["envelope"]
+            response.xml_response = etree.tostring(envelope_req, pretty_print=True, encoding="unicode")
 
         return response
 
