@@ -15,10 +15,12 @@ class ResPartner(models.Model):
     _inherit = "res.partner"
 
     mipyme_required = fields.Boolean(
-        string="Must credit invoice",
+        string="MiPyME Credit Invoice Required",
+        help="Indicates if MiPyME electronic credit invoice is required",
     )
     mipyme_from_amount = fields.Float(
-        string="Credit invoice from amount",
+        string="MiPyME Credit Invoice From Amount",
+        help="Minimum amount from which MiPyME credit invoice is required",
     )
     last_update_census = fields.Date(string="Last update census")
 
@@ -260,13 +262,41 @@ class ResPartner(models.Model):
         }
 
     def l10n_ar_fiscal_ws_fe_min_ammount(self):
-        for record in self:
-            if record.l10n_ar_vat:
-                ws = self.env.company.arca_get_connection("wsfecred")
-                res = ws.call_arca_service(
-                    "ConsultarMontoObligadoRecepcion",
-                    {"cuitConsultada": record.l10n_ar_vat, "fechaEmision": fields.Date.today()},
+        """Query minimum required amount for MiPyME credit invoice"""
+        self.ensure_one()
+
+        if not self.l10n_ar_vat:
+            raise UserError(_("Partner must have a CUIT configured"))
+
+        try:
+            ws = self.env.company.arca_get_connection("wsfecred")
+            res = ws.call_arca_service(
+                "ConsultarMontoObligadoRecepcion",
+                {"cuitConsultada": self.l10n_ar_vat, "fechaEmision": fields.Date.today()},
+            )
+
+            self.mipyme_required = res.Resultado == "S"
+            self.mipyme_from_amount = float(res.MontoObligadoRecepcion or 0.0)
+
+            return {
+                "type": "ir.actions.client",
+                "tag": "display_notification",
+                "params": {
+                    "title": _("MiPyME Query Successful"),
+                    "message": _("Required amount: %s") % res.MontoObligadoRecepcion,
+                    "type": "success",
+                },
+            }
+
+        except Exception as error:
+            raise UserError(
+                _(
+                    "Could not query MiPyME for %s (%s).\n\n"
+                    "Please verify:\n"
+                    "• Certificate authorized for 'wsfecred' in ARCA\n"
+                    "• Correct environment (production/homologation)\n"
+                    "• IP registered for certificate\n\n"
+                    "Error: %s"
                 )
-                return res
-                # record.mipyme_required = True if ws.Resultado == "S" else False
-                # record.mipyme_from_amount = float(res)
+                % (self.name, self.l10n_ar_vat, str(error))
+            ) from error
