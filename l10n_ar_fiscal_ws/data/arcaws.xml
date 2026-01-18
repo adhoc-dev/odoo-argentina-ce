@@ -6,9 +6,9 @@
         <field name="production_url">https://wsaa.afip.gov.ar/ws/services/LoginCms?wsdl</field>
         <field name="homologation_url">https://wsaahomo.afip.gov.ar/ws/services/LoginCms?wsdl</field>
     </record>
-    <record id="arca_padron_a5" model="arcaws">
-        <field name="name">Padron </field>
-        <field name="code">ws_sr_padron_a5</field>
+    <record id="arca_constancia_inscripcion" model="arcaws">
+        <field name="name">Constancia de Inscripción</field>
+        <field name="code">ws_sr_constancia_inscripcion</field>
         <field name="ws_parameters" eval="{'dummy_method': 'dummy'}"></field>
         <field name="production_url">https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
         <field name="homologation_url">https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
@@ -17,8 +17,8 @@
         <field name="name">Factura credito electronica</field>
         <field name="code">wsfecred</field>
         <field name="ws_parameters" eval="{'dummy_method': 'dummy'}"></field>
-        <field name="production_url">https://fwshomo.afip.gov.ar/wsfecred/FECredService?wsdl</field>
-        <field name="homologation_url">https://serviciosjava.afip.gob.ar/wsfecred/FECredService?wsdl</field>
+        <field name="production_url">https://serviciosjava.afip.gob.ar/wsfecred/FECredService?wsdl</field>
+        <field name="homologation_url">https://fwshomo.afip.gov.ar/wsfecred/FECredService?wsdl</field>
     </record>
 
 </odoo>
