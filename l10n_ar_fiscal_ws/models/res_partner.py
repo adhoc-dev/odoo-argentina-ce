@@ -155,8 +155,8 @@ class ResPartner(models.Model):
                 error_text = "\n• ".join(error_messages)
                 raise UserError(
                     _(
-                        "ARCA reportó los siguientes problemas para el CUIT %s:\n\n• %s\n\n"
-                        "Por favor, verifique la situación del contribuyente en:\n"
+                        "ARCA reported the following issues for CUIT %s:\n\n• %s\n\n"
+                        "Please verify the taxpayer status at:\n"
                         "https://www.arca.gob.ar/"
                     )
                     % (cuit, error_text)
@@ -165,7 +165,7 @@ class ResPartner(models.Model):
             # Estructura del servicio: datosGenerales, datosMonotributo, datosRegimenGeneral
             if not hasattr(res, "datosGenerales") or not res.datosGenerales:
                 raise UserError(
-                    _("ARCA no devolvió datos válidos para el CUIT %s.\n" "Estructura recibida: %s") % (cuit, dir(res))
+                    _("ARCA did not return valid data for CUIT %s.\n" "Structure received: %s") % (cuit, dir(res))
                 )
 
             datos_generales = res.datosGenerales
@@ -183,7 +183,7 @@ class ResPartner(models.Model):
                 denominacion = f"{apellido}, {nombre}".strip(", ")
 
             if not denominacion:
-                raise UserError(_("ARCA no devolvió nombre válido para el CUIT %s") % cuit)
+                raise UserError(_("ARCA did not return valid name for CUIT %s") % cuit)
 
             # Extraer domicilio
             domicilio_fiscal = None
@@ -237,14 +237,14 @@ class ResPartner(models.Model):
 
         except Exception as error:
             error_msg = _(
-                "No pudimos actualizar desde padrón ARCA al partner %s (%s).\n"
-                "Recomendamos verificar manualmente en la página de ARCA.\n\n"
-                "Error técnico: %s"
+                "Could not update partner %s (%s) from ARCA census.\n"
+                "We recommend verifying manually on ARCA website.\n\n"
+                "Technical error: %s"
             )
             raise UserError(error_msg % (self.name, cuit, error)) from error
 
     def action_update_from_padron_arca(self):
-        """Actualiza automáticamente los datos del partner desde padrón ARCA"""
+        """Update partner data from ARCA census"""
         self.ensure_one()
 
         vals = self.get_data_from_padron_arca()
@@ -254,8 +254,8 @@ class ResPartner(models.Model):
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
-                "title": _("Actualización exitosa"),
-                "message": _("Los datos del partner se actualizaron correctamente desde ARCA"),
+                "title": _("Update Successful"),
+                "message": _("Partner data was successfully updated from ARCA"),
                 "type": "success",
                 "sticky": False,
             },
