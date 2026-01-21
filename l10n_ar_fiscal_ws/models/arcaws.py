@@ -4,10 +4,9 @@
 ##############################################################################
 import logging
 
+from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 from odoo.tools import float_repr, ormcache, safe_eval
-
-from odoo import _, api, fields, models
 
 from .exceptions import ArcaError
 
@@ -98,7 +97,21 @@ class ArcaWsMethod(models.Model):
         ws_query = eval_context.get("result", method_dict)
         res = connection.call_arca_service(self.method_name, ws_query)
         if self.response_dict:
-            eval_context["ws_res"] = res
+            # Log the ARCA response structure for debugging
+            _logger.info("ARCA Response Type: %s", type(res))
+            _logger.info("ARCA Response Dir: %s", dir(res))
+
+            # Serialize Zeep object to Python dict for easier manipulation
+            try:
+                from zeep.helpers import serialize_object
+
+                ws_res_serialized = serialize_object(res)
+                _logger.info("ARCA Response Serialized: %s", ws_res_serialized)
+            except Exception as e:
+                _logger.warning("Could not serialize ARCA response: %s", e)
+                ws_res_serialized = res
+
+            eval_context["ws_res"] = ws_res_serialized
             if "result" in eval_context:
                 del eval_context["result"]
             method_dict = safe_eval.safe_eval(self.response_dict, eval_context)

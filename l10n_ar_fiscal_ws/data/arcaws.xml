@@ -6,30 +6,83 @@
         <field name="production_url">https://wsaa.afip.gov.ar/ws/services/LoginCms?wsdl</field>
         <field name="homologation_url">https://wsaahomo.afip.gov.ar/ws/services/LoginCms?wsdl</field>
     </record>
+
     <record id="arca_padron_a5" model="arcaws">
-        <field name="name">Padron </field>
-        <field name="code">ws_sr_padron_a5</field>
+        <field name="name">Constancia Inscripcion</field>
+        <field name="code">ws_sr_constancia_inscripcion</field>
         <field name="ws_parameters" eval="{'dummy_method': 'dummy'}"></field>
         <field name="production_url">https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
         <field name="homologation_url">https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
     </record>
-    <record id="arcawsfecred" model="arcaws">
-        <field name="name">Factura credito electronica</field>
-        <field name="code">wsfecred</field>
-        <field name="ws_parameters" eval="{'dummy_method': 'dudummy'}"></field>
-        <field name="production_url">https://fwshomo.afip.gov.ar/wsfecred/FECredService?wsdl</field>
-        <field name="homologation_url">https://serviciosjava.afip.gob.ar/wsfecred/FECredService?wsdl</field>
-    </record>
-    <record id="arca_padron_a5_method" model="arcaws.method">
+
+
+    <!-- ============================================ -->
+    <!-- MÉTODOS: Constancia de Inscripción (Padrón A5) -->
+    <!-- ============================================ -->
+
+    <!-- Método dummy para testing de conexión -->
+    <record id="arca_constancia_inscripcion_method_dummy" model="arcaws.method">
         <field name="name">dummy</field>
         <field name="arcaws_id" ref="arca_padron_a5"/>
         <field name="method_name">dummy</field>
         <field name="definition_dict">{}</field>
+        <field name="response_dict"></field>
     </record>
-    <record id="arcawsfecred_method" model="arcaws.method">
-        <field name="name">dummy</field>
-        <field name="arcaws_id" ref="arcawsfecred"/>
-        <field name="method_name">dummy</field>
-        <field name="definition_dict">{}</field>
+
+    <!-- Método getPersona_v2 - Consulta datos de persona física o jurídica por CUIT -->
+    <!-- NOTA: Este servicio requiere parámetros planos (token, sign, cuitRepresentada, idPersona) -->
+    <!-- en lugar de la estructura Auth anidada que usan otros servicios ARCA -->
+    <record id="arca_constancia_inscripcion_method_get_persona" model="arcaws.method">
+        <field name="name">get_persona</field>
+        <field name="arcaws_id" ref="arca_padron_a5"/>
+        <field name="method_name">getPersona_v2</field>
+        <field name="definition_dict">{
+    "token": connection.token,
+    "sign": connection.sign,
+    "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
+    "idPersona": int(extra_values.get('cuit', 0)),
+}</field>
+        <field name="response_dict">{
+    'datosGenerales': ws_res.get("datosGenerales", {}),
+    'nombre': ws_res.get("datosGenerales", {}).get("nombre") or ws_res.get("datosGenerales", {}).get("razonSocial", ""),
+    'apellido': ws_res.get("datosGenerales", {}).get("apellido", ""),
+    'tipoPersona': ws_res.get("datosGenerales", {}).get("tipoPersona", ""),
+    'idPersona': ws_res.get("datosGenerales", {}).get("idPersona", ""),
+    'domicilioFiscal': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}),
+    'direccion': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("direccion", ""),
+    'localidad': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("localidad", ""),
+    'codPostal': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("codPostal", ""),
+    'cod_postal': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("codPostal", ""),
+    'provincia': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("descripcionProvincia", ""),
+    'datosMonotributo': ws_res.get("datosMonotributo") or {},
+    'monotributo': (ws_res.get("datosMonotributo") or {}).get("actividadMonotributista", "N"),
+    'datosRegimenGeneral': ws_res.get("datosRegimenGeneral") or {},
+    'impuestos': [imp.get("idImpuesto") for imp in ((ws_res.get("datosRegimenGeneral") or {}).get("impuesto") or []) if isinstance(imp, dict) and imp.get("idImpuesto")] or [],
+    'imp_iva': "S" if any(imp.get("idImpuesto") == 30 for imp in ((ws_res.get("datosRegimenGeneral") or {}).get("impuesto") or []) if isinstance(imp, dict)) else "N",
+    'actividades': (ws_res.get("datosRegimenGeneral") or {}).get("actividad", []),
+    'errorConstancia': ws_res.get("errorConstancia", {}),
+    'errorMonotributo': ws_res.get("errorMonotributo", {}),
+    'errorRegimenGeneral': ws_res.get("errorRegimenGeneral", {}),
+}</field>
     </record>
+
+    <!-- Método getPersonaList_v2 - Consulta datos de múltiples personas por lista de CUITs -->
+    <record id="arca_constancia_inscripcion_method_get_persona_list" model="arcaws.method">
+        <field name="name">get_persona_list</field>
+        <field name="arcaws_id" ref="arca_padron_a5"/>
+        <field name="method_name">getPersonaList_v2</field>
+        <field name="definition_dict">{
+    "token": connection.token,
+    "sign": connection.sign,
+    "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
+    "idPersona": [int(cuit) for cuit in extra_values.get('cuit_list', [])],
+}</field>
+        <field name="response_dict">result = {
+    'personaListReturn': ws_res,
+    'persona': ws_res.get("persona", []),
+    'metadata': ws_res.get("metadata", {}),
+}</field>
+    </record>
+
+
 </odoo>

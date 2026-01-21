@@ -168,6 +168,162 @@ Iguales que en 18:
 
 ---
 
+## Arquitectura de llamadas a servicios ARCA (AFIP Web Services)
+
+Este repositorio implementa una **arquitectura centralizada** para llamadas a servicios SOAP de ARCA (AFIP) a través del módulo `l10n_ar_fiscal_ws`. Es crítico seguir los patrones establecidos.
+
+### ✅ Patrón CORRECTO: Usar `call_arca_method`
+
+**Definir métodos en XML** (`data/arcaws.xml`):
+
+```xml
+<record id="arca_constancia_inscripcion_method_get_persona" model="arcaws.method">
+    <field name="name">get_persona</field>
+    <field name="arcaws_id" ref="arca_padron_a5"/>
+    <field name="method_name">getPersona_v2</field>
+    <field name="definition_dict">{
+    "Auth": {
+        "Cuit": company_id.partner_id.ensure_vat(),
+        "Sign": connection.sign,
+        "Token": connection.token,
+    },
+    'idPersona': int(extra_values.get('cuit', 0)),
+}</field>
+    <field name="response_dict">{...}</field>
+</record>
+```
+
+**Llamar desde Python:**
+
+```python
+def get_data_from_padron_arca(self):
+    self.ensure_one()
+    cuit = self.ensure_vat()
+    
+    # Buscar el servicio configurado
+    arcaws = self.env["arcaws"].search([("code", "=", "ws_sr_constancia_inscripcion")])
+    if not arcaws:
+        raise UserError(_("No se encontró configuración del servicio"))
+    
+    # Buscar el método
+    method_id = arcaws.method_ids.filtered(lambda m: m.name == "get_persona")
+    if not method_id:
+        raise UserError(_("No se encontró el método configurado"))
+    
+    # Llamar usando la arquitectura ARCAWS
+    res = method_id.call_arca_method(obj=self, extra_values={"cuit": cuit})
+    return res
+```
+
+**Ventajas:**
+- ✅ Manejo automático de autenticación (`token`, `sign`, `cuitRepresentada`)
+- ✅ Validación de parámetros según WSDL
+- ✅ Logs y trazabilidad centralizados
+- ✅ Manejo de errores consistente
+- ✅ Respeta permisos y control de acceso
+
+### ❌ Anti-patrón: Llamada directa con `call_arca_service`
+
+**NO HACER:**
+
+```python
+# ❌ INCORRECTO - Omite la arquitectura ARCAWS
+padron = company.arca_get_connection("ws_sr_constancia_inscripcion")
+res = padron.call_arca_service("getPersona_v2", {"idPersona": cuit}, auth="plain")
+```
+
+**Problemas:**
+- ❌ Zeep rechaza parámetros no definidos en WSDL (como `auth`)
+- ❌ Falta pasar `token`, `sign` y `cuitRepresentada` manualmente
+- ❌ No hay validación de parámetros
+- ❌ Dificulta mantenimiento y debugging
+
+### Excepciones: ¿Cuándo usar `call_arca_service` directamente?
+
+Solo en casos muy específicos donde:
+1. El servicio NO requiere autenticación (`LoginCms` inicial)
+2. Es un servicio legacy sin método ARCAWS definido
+
+**En ese caso, pasar TODOS los parámetros esperados:**
+
+```python
+# Si realmente es necesario (casos excepcionales)
+connection = company.arca_get_connection("ws_code")
+res = connection.call_arca_service("ServiceMethod", {
+    "token": connection.token,
+    "sign": connection.sign,
+    "cuitRepresentada": int(company.partner_id.l10n_ar_vat),
+    "param1": value1,
+    "param2": value2,
+})
+```
+
+### Flujo de llamadas ARCAWS
+
+```
+┌─────────────────────────────────────────┐
+│  Código de aplicación (res_partner.py) │
+│  method_id.call_arca_method(...)        │
+└───────────────────┬─────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│  ARCAWS Layer (arcaws.py)               │
+│  • Busca arcaws por code                │
+│  • Busca method por name                │
+│  • Construye query con definition_dict  │
+│  • Obtiene token/sign de connection     │
+└───────────────────┬─────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│  Connection (arcaws_connection.py)      │
+│  connection.call_arca_service()         │
+│  • Crea Zeep Client                     │
+│  • Expande **data al servicio SOAP      │
+└───────────────────┬─────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│  Servicio SOAP ARCA                     │
+│  (getPersona_v2, FECAESolicitar, etc.)  │
+└─────────────────────────────────────────┘
+```
+
+### Checklist de revisión para llamadas ARCA
+
+Al revisar código que interactúa con servicios ARCA, verificar:
+
+- [ ] ¿Se usa `method_id.call_arca_method()` en lugar de llamada directa?
+- [ ] ¿Existe el método definido en `data/arcaws.xml`?
+- [ ] ¿El `definition_dict` incluye correctamente `Auth` con `Token`, `Sign` y `Cuit`?
+- [ ] ¿Se validan errores y se manejan excepciones apropiadamente?
+- [ ] ¿Los `extra_values` coinciden con los esperados en `definition_dict`?
+- [ ] Si hay llamada directa a `call_arca_service`, ¿es realmente necesaria?
+- [ ] Si es llamada directa, ¿se pasan TODOS los parámetros del WSDL?
+
+### Caso de estudio: Fix getPersona_v2
+
+**Error reportado:**
+```
+getPersona_v2() got an unexpected keyword argument 'auth'
+Signature: token: xsd:string, sign: xsd:string, cuitRepresentada: xsd:long, idPersona: xsd:long
+```
+
+**Causa:** Llamada directa con parámetro inválido
+```python
+padron.call_arca_service("getPersona_v2", {"idPersona": cuit}, auth="plain")
+```
+
+**Solución:** Usar método ARCAWS existente
+```python
+arcaws = self.env["arcaws"].search([("code", "=", "ws_sr_constancia_inscripcion")])
+method_id = arcaws.method_ids.filtered(lambda m: m.name == "get_persona")
+res = method_id.call_arca_method(obj=self, extra_values={"cuit": cuit})
+```
+
+---
+
 ## Estilo del feedback (v19)
 
 * El feedback debe ser **breve, concreto y accionable**.
