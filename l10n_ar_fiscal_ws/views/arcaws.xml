@@ -31,7 +31,7 @@
             <list string="ARCA WS">
                 <field name="name"/>
                 <field name="code"/>
-                <button name="action_dummie" string="Dummy test" invisible="not dummy_method" type="object"/>
+                <button name="action_dummy" string="Dummy test" invisible="not dummy_method" type="object"/>
             </list>
         </field>
     </record>

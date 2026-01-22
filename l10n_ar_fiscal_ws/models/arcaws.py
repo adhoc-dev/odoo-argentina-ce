@@ -7,6 +7,7 @@ import logging
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 from odoo.tools import float_repr, ormcache, safe_eval
+from zeep.helpers import serialize_object
 
 from .exceptions import ArcaError
 
@@ -41,22 +42,24 @@ class ArcaWs(models.Model):
         """
         url_record = self.search([("code", "=", code)], limit=1)
         if not url_record:
-            raise ValidationError(_("No ARCA URL found for service '%s'.") % code)
+            msg = _("No ARCA URL found for service '%s'.")
+            raise ValidationError(msg % code)
         if env_type == "production":
             return url_record.production_url
         else:
             return url_record.homologation_url
 
-    def action_dummie(self):
+    def action_dummy(self):
         self.ensure_one()
-        _logger.info("Dummie action called")
+        _logger.info("Dummy action called")
         company = self.env.company
         method_id = self.method_ids.filtered(lambda m: m.name == "dummy")
         if method_id:
-            raise ArcaError(method_id.call_arca_method(self, company_id=company))
+            result = method_id.call_arca_method(self, company_id=company)
+            raise ArcaError(result)
 
     def _compute_dummy_method(self):
-        has_dummy = self.filtered(lambda x: x.method_ids.filtered(lambda x: x.name == "dummy"))
+        has_dummy = self.filtered(lambda x: x.method_ids.filtered(lambda m: m.name == "dummy"))
         has_dummy.dummy_method = True
         (self - has_dummy).dummy_method = False
 
@@ -97,16 +100,16 @@ class ArcaWsMethod(models.Model):
         ws_query = eval_context.get("result", method_dict)
         res = connection.call_arca_service(self.method_name, ws_query)
         if self.response_dict:
-            # Log the ARCA response structure for debugging
-            _logger.info("ARCA Response Type: %s", type(res))
-            _logger.info("ARCA Response Dir: %s", dir(res))
+            # Log de estructura de respuesta para debugging
+            _logger.debug("ARCA Response Type: %s", type(res))
+            _logger.debug("ARCA Response Dir: %s", dir(res))
 
-            # Serialize Zeep object to Python dict for easier manipulation
+            # Serializar objeto Zeep a dict nativo de Python para
+            # permitir su manipulación mediante response_dict
+            # (safe_eval requiere tipos nativos)
             try:
-                from zeep.helpers import serialize_object
-
                 ws_res_serialized = serialize_object(res)
-                _logger.info("ARCA Response Serialized: %s", ws_res_serialized)
+                _logger.debug("ARCA Response Serialized: %s", ws_res_serialized)
             except Exception as e:
                 _logger.warning("Could not serialize ARCA response: %s", e)
                 ws_res_serialized = res

@@ -24,7 +24,7 @@ class ResPartner(models.Model):
 
     # Separo esto para poder heredar de otros
     # modulos y extender los datos
-    def parce_census_vals(self, census):
+    def parse_census_vals(self, census):
         """Parse census data from ARCA Padrón A5.
 
         Args:
@@ -72,9 +72,9 @@ class ResPartner(models.Model):
         localidad = get_value(census, "localidad")
 
         if provincia:
-            # depending on the database, caba can have one of this codes
+            # CABA puede tener diferentes códigos según la base de datos
             caba_codes = ["C", "CABA", "ABA"]
-            # if not localidad then it should be CABA.
+            # Si no hay localidad especificada, asumir CABA
             if not localidad:
                 state = self.env["res.country.state"].search(
                     [
@@ -83,10 +83,9 @@ class ResPartner(models.Model):
                     ],
                     limit=1,
                 )
-                # Para CABA sin localidad, establecer CABA
                 if state:
                     vals["city"] = "Ciudad Autónoma de Buenos Aires"
-            # If localidad cant be caba
+            # Para provincias (excluir CABA cuando hay localidad)
             else:
                 state = self.env["res.country.state"].search(
                     [
@@ -112,7 +111,7 @@ class ResPartner(models.Model):
                 elif imp_iva == "EX":
                     vals["l10n_ar_afip_responsibility_type_id"] = self.env.ref("l10n_ar.res_IVAE").id
             except Exception as e:
-                msg = "Could not set ARCA responsibility type: %s"
+                msg = "No se pudo establecer tipo de responsabilidad ARCA: %s"
                 _logger.warning(msg, e)
 
         return vals
@@ -136,7 +135,7 @@ class ResPartner(models.Model):
             # Actualizar el partner
             self.write(partner_vals)
 
-            # Refrescar el formulario para mostrar los cambios
+            # Mostrar notificación de éxito y refrescar la vista
             return {
                 "type": "ir.actions.client",
                 "tag": "display_notification",
@@ -189,7 +188,7 @@ class ResPartner(models.Model):
             raise UserError(error_msg % (self.name, cuit, e))
 
         # Log completo para diagnosticar qué datos devuelve ARCA
-        _logger.info(
+        _logger.debug(
             "=== Respuesta ARCA completa para CUIT %s ===\n"
             "Claves: %s\n"
             "nombre: %s\n"
@@ -232,16 +231,16 @@ class ResPartner(models.Model):
 
         if not denominacion or denominacion == ", ":
             _logger.warning(
-                "ARCA no devolvió nombre válido para CUIT %s. Respuesta: %s",
+                "ARCA no devolvió nombre válido para CUIT %s. Claves presentes: %s",
                 cuit,
-                res,
+                list(res.keys()) if isinstance(res, dict) else type(res),
             )
             error_detail = "La ARCA no devolvió nombre válido"
             raise UserError(error_msg % (self.name, cuit, error_detail))
 
-        # Agregar denominación al resultado para parce_census_vals
+        # Agregar denominación al resultado para parse_census_vals
         res["denominacion"] = denominacion
-        vals = self.parce_census_vals(res)
+        vals = self.parse_census_vals(res)
         return vals
 
     def l10n_ar_fiscal_ws_fe_min_ammount(self):
@@ -256,6 +255,3 @@ class ResPartner(models.Model):
                     },
                 )
                 return res
-                # record.mipyme_required = True if
-                # ws.Resultado == "S" else False
-                # record.mipyme_from_amount = float(res)

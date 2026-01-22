@@ -57,7 +57,11 @@
     'datosMonotributo': ws_res.get("datosMonotributo") or {},
     'monotributo': (ws_res.get("datosMonotributo") or {}).get("actividadMonotributista", "N"),
     'datosRegimenGeneral': ws_res.get("datosRegimenGeneral") or {},
-    'impuestos': [imp.get("idImpuesto") for imp in ((ws_res.get("datosRegimenGeneral") or {}).get("impuesto") or []) if isinstance(imp, dict) and imp.get("idImpuesto")],
+    'impuestos': [
+        imp.get("idImpuesto")
+        for imp in ((ws_res.get("datosRegimenGeneral") or {}).get("impuesto") or [])
+        if isinstance(imp, dict) and imp.get("idImpuesto")
+    ],
     'imp_iva': "S" if any(imp.get("idImpuesto") == 30 for imp in ((ws_res.get("datosRegimenGeneral") or {}).get("impuesto") or []) if isinstance(imp, dict)) else "N",
     'actividades': (ws_res.get("datosRegimenGeneral") or {}).get("actividad", []),
     'errorConstancia': ws_res.get("errorConstancia", {}),
