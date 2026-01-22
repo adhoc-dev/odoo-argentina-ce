@@ -338,8 +338,12 @@ class ResPartner(models.Model):
                     _logger.error("Error validando respuesta ARCA: %s", ue)
                     continue
 
-                # Crear diccionario CUIT -> datos
-                persona_by_cuit = {str(p.get("datosGenerales", {}).get("idPersona", "")): p for p in personas}
+                # Crear diccionario CUIT -> datos (filtrar elementos None o inválidos)
+                persona_by_cuit = {
+                    str(p.get("datosGenerales", {}).get("idPersona", "")): p
+                    for p in personas
+                    if p and isinstance(p, dict)
+                }
 
                 # Actualizar cada partner del lote
                 for partner in batch_partners:
@@ -448,7 +452,10 @@ class ResPartner(models.Model):
 
             # Validar y serializar respuesta usando método auxiliar
             personas = self._validate_and_serialize_arca_response(res, cuit)
-            persona_data = personas[0]
+            persona_data = personas[0] if personas else None
+
+            if not persona_data or not isinstance(persona_data, dict):
+                raise UserError(_("ARCA no devolvió datos válidos para el CUIT %s") % cuit)
 
             # Log para diagnóstico
             _logger.debug(
