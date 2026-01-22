@@ -49,7 +49,7 @@ class ArcaWs(models.Model):
         else:
             return url_record.homologation_url
 
-    def action_dummy(self):
+    def action_dummie(self):
         self.ensure_one()
         _logger.info("Dummy action called")
         company = self.env.company

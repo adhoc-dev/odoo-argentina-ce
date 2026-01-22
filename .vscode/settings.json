@@ -1,0 +1,45 @@
+{
+  // GitHub Copilot - Habilitar para Python y XML
+  "github.copilot.enable": {
+    "*": true,
+    "python": true,
+    "xml": true,
+    "yaml": true,
+    "markdown": true
+  },
+  "github.copilot.editor.enableAutoCompletions": true,
+  "editor.inlineSuggest.enabled": true,
+
+  // Copilot Chat - Habilitar revisiones
+  "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+  "github.copilot.chat.localeOverride": "es",
+
+  // Python - Configuración de linting
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.ruffEnabled": true,
+  "python.formatting.provider": "none",
+
+  // Editor - Mostrar problemas inline
+  "editor.lightbulb.enabled": "on",
+  "editor.quickSuggestions": {
+    "other": "on",
+    "comments": "off",
+    "strings": "off"
+  },
+
+  // Pre-commit integration
+  "python.terminal.activateEnvironment": true,
+
+  // Odoo específico
+  "files.associations": {
+    "*.xml": "xml",
+    "*.po": "gettext"
+  },
+
+  // Excluir archivos de búsqueda
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  }
+}
