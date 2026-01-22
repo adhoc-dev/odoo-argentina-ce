@@ -182,16 +182,10 @@ Este repositorio implementa una **arquitectura centralizada** para llamadas a se
     <field name="arcaws_id" ref="arca_padron_a5"/>
     <field name="method_name">getPersona_v2</field>
     <field name="definition_dict">{
-    "Auth": {
-        "Cuit": company_id.partner_id.ensure_vat(),
-        "Sign": connection.sign,
-        "Token": connection.token,
-    },
-    'idPersona': int(extra_values.get('cuit', 0)),
-}</field>
-    <field name="response_dict">{...}</field>
-</record>
-```
+    "token": connection.token,
+    "sign": connection.sign,
+    "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
+    "idPersona": int(extra_values.get('cuit', 0)),
 
 **Llamar desde Python:**
 
@@ -298,11 +292,9 @@ Al revisar código que interactúa con servicios ARCA, verificar:
 - [ ] ¿Existe el método definido en `data/arcaws.xml`?
 - [ ] ¿El `definition_dict` incluye correctamente `Auth` con `Token`, `Sign` y `Cuit`?
 - [ ] ¿Se validan errores y se manejan excepciones apropiadamente?
-- [ ] ¿Los `extra_values` coinciden con los esperados en `definition_dict`?
+- [ ] ¿El `definition_dict` respeta la firma del servicio (estructura `Auth` con `Token`, `Sign`, `Cuit` o parámetros planos como `token`, `sign`, `cuitRepresentada`, `idPersona` en Padrón A5)?
 - [ ] Si hay llamada directa a `call_arca_service`, ¿es realmente necesaria?
 - [ ] Si es llamada directa, ¿se pasan TODOS los parámetros del WSDL?
-
-### Caso de estudio: Fix getPersona_v2
 
 **Error reportado:**
 ```

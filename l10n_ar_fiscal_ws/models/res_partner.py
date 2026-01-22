@@ -74,8 +74,14 @@ class ResPartner(models.Model):
         if provincia:
             # CABA puede tener diferentes códigos según la base de datos
             caba_codes = ["C", "CABA", "ABA"]
-            # Si no hay localidad especificada, asumir CABA
-            if not localidad:
+            # Detectar si la provincia es CABA por nombre
+            provincia_upper = provincia.upper()
+            is_caba = any(
+                caba_name in provincia_upper for caba_name in ["CAPITAL", "CIUDAD AUTONOMA", "CABA", "C.A.B.A"]
+            )
+
+            # Si no hay localidad y la provincia es CABA, establecer CABA
+            if not localidad and is_caba:
                 state = self.env["res.country.state"].search(
                     [
                         ("code", "in", caba_codes),
@@ -85,8 +91,8 @@ class ResPartner(models.Model):
                 )
                 if state:
                     vals["city"] = "Ciudad Autónoma de Buenos Aires"
-            # Para provincias (excluir CABA cuando hay localidad)
-            else:
+            # Para provincias con localidad (o provincias no-CABA sin localidad)
+            elif localidad or not is_caba:
                 state = self.env["res.country.state"].search(
                     [
                         ("name", "ilike", provincia),
@@ -166,7 +172,7 @@ class ResPartner(models.Model):
 
         # consultamos a5 ya que extiende a4 y tiene validez de constancia
         code = "ws_sr_constancia_inscripcion"
-        arcaws = self.env["arcaws"].search([("code", "=", code)])
+        arcaws = self.env["arcaws"].search([("code", "=", code)], limit=1)
         if not arcaws:
             msg = _("No se encontró configuración del servicio de padrón")
             raise UserError(msg)
@@ -175,6 +181,7 @@ class ResPartner(models.Model):
         if not method_id:
             msg = _("No se encontró el método get_persona configurado")
             raise UserError(msg)
+        method_id.ensure_one()
 
         error_msg = _(
             "No pudimos actualizar desde padrón ARCA al partner %s (%s).\n"
