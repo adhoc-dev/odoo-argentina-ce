@@ -77,7 +77,10 @@ class ResPartner(models.Model):
             # if not localidad then it should be CABA.
             if not localidad:
                 state = self.env["res.country.state"].search(
-                    [("code", "in", caba_codes), ("country_id.code", "=", "AR")],
+                    [
+                        ("code", "in", caba_codes),
+                        ("country_id.code", "=", "AR"),
+                    ],
                     limit=1,
                 )
                 # Para CABA sin localidad, establecer CABA
@@ -99,7 +102,8 @@ class ResPartner(models.Model):
         # Intentar determinar tipo de responsabilidad ARCA basado
         # en IVA y monotributo. Solo si el campo existe en el modelo
         # (puede estar en l10n_ar u otro módulo)
-        if self.env["res.partner"]._fields.get("l10n_ar_afip_responsibility_type_id"):
+        partner_fields = self.env["res.partner"]._fields
+        if partner_fields.get("l10n_ar_afip_responsibility_type_id"):
             try:
                 if imp_iva == "NI" and monotributo == "S":
                     vals["l10n_ar_afip_responsibility_type_id"] = self.env.ref("l10n_ar.res_RM").id
@@ -108,18 +112,20 @@ class ResPartner(models.Model):
                 elif imp_iva == "EX":
                     vals["l10n_ar_afip_responsibility_type_id"] = self.env.ref("l10n_ar.res_IVAE").id
             except Exception as e:
-                _logger.warning("Could not set ARCA responsibility type: %s", e)
+                msg = "Could not set ARCA responsibility type: %s"
+                _logger.warning(msg, e)
 
         return vals
 
     def update_from_padron_arca(self):
-        """Actualiza el partner directamente desde el Padrón ARCA sin wizard."""
+        """Actualiza el partner desde el Padrón ARCA sin wizard."""
         self.ensure_one()
         try:
             partner_vals = self.get_data_from_padron_arca()
 
             # Aplicar title case si está configurado
-            parameter = self.env["ir.config_parameter"].sudo().get_param("use_title_case_on_padron_afip")
+            param = "use_title_case_on_padron_afip"
+            parameter = self.env["ir.config_parameter"].sudo().get_param(param)
             title_case = parameter and parameter != "False" and parameter != "0"
 
             if title_case:
@@ -152,20 +158,24 @@ class ResPartner(models.Model):
         except UserError:
             raise
         except Exception as e:
-            raise UserError(_("Error al actualizar desde el Padrón ARCA:\n%s") % str(e))
+            error_msg = _("Error al actualizar desde el Padrón ARCA:\n%s")
+            raise UserError(error_msg % str(e))
 
     def get_data_from_padron_arca(self):
         self.ensure_one()
         cuit = self.ensure_vat()
 
         # consultamos a5 ya que extiende a4 y tiene validez de constancia
-        arcaws = self.env["arcaws"].search([("code", "=", "ws_sr_constancia_inscripcion")])
+        code = "ws_sr_constancia_inscripcion"
+        arcaws = self.env["arcaws"].search([("code", "=", code)])
         if not arcaws:
-            raise UserError(_("No se encontró configuración del servicio de padrón ARCA"))
+            msg = _("No se encontró configuración del servicio de padrón")
+            raise UserError(msg)
 
         method_id = arcaws.method_ids.filtered(lambda m: m.name == "get_persona")
         if not method_id:
-            raise UserError(_("No se encontró el método get_persona configurado"))
+            msg = _("No se encontró el método get_persona configurado")
+            raise UserError(msg)
 
         error_msg = _(
             "No pudimos actualizar desde padrón ARCA al partner %s (%s).\n"
@@ -226,7 +236,8 @@ class ResPartner(models.Model):
                 cuit,
                 res,
             )
-            raise UserError(error_msg % (self.name, cuit, "La ARCA no devolvió nombre válido"))
+            error_detail = "La ARCA no devolvió nombre válido"
+            raise UserError(error_msg % (self.name, cuit, error_detail))
 
         # Agregar denominación al resultado para parce_census_vals
         res["denominacion"] = denominacion
@@ -239,8 +250,12 @@ class ResPartner(models.Model):
                 ws = self.env.company.arca_get_connection("wsfecred")
                 res = ws.call_arca_service(
                     "ConsultarMontoObligadoRecepcion",
-                    {"cuitConsultada": record.l10n_ar_vat, "fechaEmision": fields.Date.today()},
+                    {
+                        "cuitConsultada": record.l10n_ar_vat,
+                        "fechaEmision": fields.Date.today(),
+                    },
                 )
                 return res
-                # record.mipyme_required = True if ws.Resultado == "S" else False
+                # record.mipyme_required = True if
+                # ws.Resultado == "S" else False
                 # record.mipyme_from_amount = float(res)

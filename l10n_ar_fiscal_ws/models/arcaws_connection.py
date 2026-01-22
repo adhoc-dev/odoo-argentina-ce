@@ -5,11 +5,10 @@
 import logging
 
 from lxml import etree
+from odoo import api, fields, models
 from odoo.exceptions import UserError
 from zeep import Client
 from zeep.plugins import HistoryPlugin
-
-from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
