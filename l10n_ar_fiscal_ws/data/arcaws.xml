@@ -11,8 +11,8 @@
         <field name="name">Constancia de Inscripción</field>
         <field name="code">ws_sr_constancia_inscripcion</field>
         <field name="ws_parameters" eval="{'dummy_method': 'dummy'}"></field>
-        <field name="production_url">https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
-        <field name="homologation_url">https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
+        <field name="production_url">https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5?WSDL</field>
+        <field name="homologation_url">https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5?WSDL</field>
     </record>
 
 
@@ -81,11 +81,7 @@
     "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
     "idPersona": [int(cuit) for cuit in extra_values.get('cuit_list', [])],
 }</field>
-        <field name="response_dict">result = {
-    'personaListReturn': ws_res,
-    'persona': ws_res.get("persona", []),
-    'metadata': ws_res.get("metadata", {}),
-}</field>
+        <field name="response_dict"></field>
     </record>
 
 

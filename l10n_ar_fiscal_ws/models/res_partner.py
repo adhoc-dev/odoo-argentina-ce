@@ -7,6 +7,7 @@ import logging
 
 from odoo import _, fields, models
 from odoo.exceptions import UserError
+from zeep.helpers import serialize_object
 
 _logger = logging.getLogger(__name__)
 
@@ -21,6 +22,10 @@ class ResPartner(models.Model):
         string="Credit invoice from amount",
     )
     last_update_census = fields.Date(string="Last update census")
+
+    # Constantes para servicios ARCA - Pueden ser heredadas en módulos custom
+    _PADRON_SERVICE_CODE = "ws_sr_constancia_inscripcion"
+    _PADRON_METHOD_NAME = "get_persona_list"
 
     # Separo esto para poder heredar de otros
     # modulos y extender los datos
@@ -76,9 +81,8 @@ class ResPartner(models.Model):
             caba_codes = ["C", "CABA", "ABA"]
             # Detectar si la provincia es CABA por nombre
             provincia_upper = provincia.upper()
-            is_caba = any(
-                caba_name in provincia_upper for caba_name in ["CAPITAL", "CIUDAD AUTONOMA", "CABA", "C.A.B.A"]
-            )
+            caba_names = ["CAPITAL", "CIUDAD AUTONOMA", "CABA", "C.A.B.A"]
+            is_caba = any(caba_name in provincia_upper for caba_name in caba_names)
 
             # Si no hay localidad y la provincia es CABA, establecer CABA
             if not localidad and is_caba:
@@ -122,23 +126,145 @@ class ResPartner(models.Model):
 
         return vals
 
+    def _transform_arca_persona_to_census(self, persona_data):
+        """Transform ARCA persona structure to census format.
+
+        Prepares data for parse_census_vals method.
+
+        Args:
+            persona_data: Dictionary with nested ARCA response structure.
+
+        Returns:
+            Dictionary with flat structure expected by parse_census_vals.
+        """
+        # Construir denominación desde nombre y apellido
+        datos_generales = persona_data.get("datosGenerales", {})
+        nombre = (datos_generales.get("nombre") or "").strip()
+        apellido = (datos_generales.get("apellido") or "").strip()
+        razon_social = (datos_generales.get("razonSocial") or "").strip()
+
+        # Para personas jurídicas solo viene razonSocial
+        # Para físicas viene nombre+apellido
+        if razon_social:
+            denominacion = razon_social
+        elif apellido:
+            denominacion = f"{apellido}, {nombre}"
+        else:
+            denominacion = nombre
+
+        if not denominacion or denominacion == ", ":
+            msg = "ARCA no devolvió nombre válido para esta persona"
+            raise UserError(_(msg))
+
+        # Transformar estructura anidada a formato plano
+        domicilio = datos_generales.get("domicilioFiscal", {})
+        datos_monotributo = persona_data.get("datosMonotributo") or {}
+        datos_regimen = persona_data.get("datosRegimenGeneral") or {}
+        impuestos_list = datos_regimen.get("impuesto") or []
+
+        # Determinar si está inscripto en IVA (impuesto 30)
+        imp_iva = "S" if any(imp.get("idImpuesto") == 30 for imp in impuestos_list if isinstance(imp, dict)) else "N"
+
+        return {
+            "denominacion": denominacion,
+            "direccion": domicilio.get("direccion", ""),
+            "localidad": domicilio.get("localidad", ""),
+            "cod_postal": domicilio.get("codPostal", ""),
+            "provincia": domicilio.get("descripcionProvincia", ""),
+            "monotributo": datos_monotributo.get("actividadMonotributista", "N"),
+            "imp_iva": imp_iva,
+            "tipoPersona": datos_generales.get("tipoPersona", ""),
+        }
+
+    def _get_padron_service_and_method(self, service_code=None, method_name=None):
+        """Obtiene el servicio y método ARCAWS para consultas.
+
+        Args:
+            service_code: Código del servicio (default: _PADRON_SERVICE_CODE)
+            method_name: Nombre del método (default: _PADRON_METHOD_NAME)
+
+        Returns:
+            tuple: (arcaws, method_id)
+
+        Raises:
+            UserError: Si no se encuentra el servicio o método configurado
+        """
+        code = service_code or self._PADRON_SERVICE_CODE
+        method = method_name or self._PADRON_METHOD_NAME
+
+        arcaws = self.env["arcaws"].search([("code", "=", code)], limit=1)
+        if not arcaws:
+            msg = _("No se encontró configuración del servicio de padrón")
+            raise UserError(msg)
+
+        method_id = arcaws.method_ids.filtered(lambda m: m.name == method)
+        if not method_id:
+            msg = _("No se encontró el método %s configurado") % method
+            raise UserError(msg)
+
+        method_id.ensure_one()
+        return arcaws, method_id
+
+    def _validate_and_serialize_arca_response(self, res, context_info=""):
+        """Valida y serializa respuesta de servicio ARCA.
+
+        Args:
+            res: Respuesta del servicio ARCA (puede ser objeto Zeep o dict)
+            context_info: Información de contexto para mensajes de error
+
+        Returns:
+            list: Lista de personas desde la respuesta
+
+        Raises:
+            UserError: Si la respuesta es inválida o no contiene datos
+        """
+        if res is None:
+            raise UserError(_("ARCA devolvió respuesta vacía para %s") % context_info)
+
+        # Serializar respuesta Zeep a diccionario Python si es necesario
+        if not isinstance(res, dict):
+            res = serialize_object(res)
+
+        if not res or not isinstance(res, dict):
+            raise UserError(_("Error al serializar respuesta ARCA para %s") % context_info)
+
+        # Extraer lista de personas
+        personas = res.get("persona", [])
+        if not personas:
+            raise UserError(_("ARCA no devolvió datos para %s") % context_info)
+
+        return personas
+
+    def _transform_and_parse_persona_data(self, persona_data, apply_title_case=False):
+        """Transforma datos de persona ARCA a valores de partner Odoo.
+
+        Args:
+            persona_data: Diccionario con datos de persona desde ARCA
+            apply_title_case: Si True, aplica title case a campos de texto
+
+        Returns:
+            dict: Valores para actualizar partner
+
+        Raises:
+            UserError: Si hay error en la transformación o parseo
+        """
+        census_data = self._transform_arca_persona_to_census(persona_data)
+        vals = self.parse_census_vals(census_data)
+
+        # Aplicar title case si se solicita
+        if apply_title_case:
+            for key in ("name", "city", "street"):
+                if key in vals and vals[key]:
+                    vals[key] = vals[key].title()
+
+        return vals
+
     def update_from_padron_arca(self):
         """Actualiza el partner desde el Padrón ARCA sin wizard."""
         self.ensure_one()
         try:
             partner_vals = self.get_data_from_padron_arca()
-
-            # Aplicar title case si está configurado
-            param = "use_title_case_on_padron_afip"
-            parameter = self.env["ir.config_parameter"].sudo().get_param(param)
-            title_case = parameter and parameter != "False" and parameter != "0"
-
-            if title_case:
-                for key in ("name", "city", "street"):
-                    if key in partner_vals and partner_vals[key]:
-                        partner_vals[key] = partner_vals[key].title()
-
-            # Actualizar el partner
+            # Title case ya aplicado en get_data_from_padron_arca
             self.write(partner_vals)
 
             # Mostrar notificación de éxito y refrescar la vista
@@ -166,22 +292,149 @@ class ResPartner(models.Model):
             error_msg = _("Error al actualizar desde el Padrón ARCA:\n%s")
             raise UserError(error_msg % str(e))
 
+    def action_update_from_padron_mass(self):
+        """Actualiza múltiples partners desde Padrón ARCA.
+
+        Permite actualizar varios contactos en una sola llamada.
+        Filtra partners con CUIT válido, agrupa en lotes y consulta
+        el Padrón A5 de manera masiva.
+        """
+        # Filtrar partners con CUIT válido (tipo 80)
+        partners_with_cuit = self.filtered(
+            lambda p: p.vat
+            and p.l10n_latam_identification_type_id
+            and p.l10n_latam_identification_type_id.l10n_ar_afip_code == "80"
+        )
+
+        if not partners_with_cuit:
+            msg = "No se encontraron contactos con CUIT válido"
+            raise UserError(_(msg))
+
+        # Obtener servicio y método usando método auxiliar
+        arcaws, method_id = self._get_padron_service_and_method()
+
+        # Procesar en lotes de 100 CUITs (límite de ARCA)
+        batch_size = 100
+        updated_count = 0
+        error_details = []
+
+        # Dividir en lotes
+        for i in range(0, len(partners_with_cuit), batch_size):
+            batch_partners = partners_with_cuit[i : i + batch_size]
+            cuit_list = [p.ensure_vat() for p in batch_partners]
+
+            try:
+                # Llamar al servicio ARCA con la lista de CUITs
+                res = method_id.call_arca_method(
+                    obj=batch_partners[0],
+                    extra_values={"cuit_list": cuit_list},
+                )
+
+                # Validar y serializar respuesta usando método auxiliar
+                try:
+                    personas = self._validate_and_serialize_arca_response(res, f"lote {i//batch_size + 1}")
+                except UserError as ue:
+                    error_details.append(str(ue))
+                    _logger.error("Error validando respuesta ARCA: %s", ue)
+                    continue
+
+                # Crear diccionario CUIT -> datos
+                persona_by_cuit = {str(p.get("datosGenerales", {}).get("idPersona", "")): p for p in personas}
+
+                # Actualizar cada partner del lote
+                for partner in batch_partners:
+                    try:
+                        partner_cuit = partner.ensure_vat()
+                        persona_data = persona_by_cuit.get(partner_cuit)
+
+                        if not persona_data:
+                            msg = "CUIT %s: Sin datos en respuesta ARCA"
+                            error_details.append(_(msg) % partner_cuit)
+                            continue
+
+                        # Transformar y parsear usando método auxiliar
+                        vals = partner._transform_and_parse_persona_data(persona_data)
+                        # Actualizar sin tracking para evitar diálogos confusos
+                        partner.with_context(tracking_disable=True).write(vals)
+                        updated_count += 1
+
+                    except Exception as e:
+                        msg = "CUIT %s: %s"
+                        error_details.append(_(msg) % (partner_cuit, str(e)))
+                        _logger.warning("Error actualizando partner %s: %s", partner.id, e)
+
+            except Exception as e:
+                # Error en todo el lote
+                error_details.append(_("Error procesando lote: %s") % str(e))
+                _logger.error("Error en lote de actualización masiva: %s", e)
+
+        # Preparar mensaje de resultado
+        error_count = len(error_details)
+
+        if updated_count > 0 and error_count == 0:
+            title = _("✓ Actualización exitosa")
+            message = _("Se actualizaron %d contactos desde el Padrón ARCA") % updated_count
+            msg_type = "success"
+            sticky = False
+        elif updated_count > 0 and error_count > 0:
+            title = _("⚠ Actualización parcial")
+            message = _("Se actualizaron %d contactos correctamente.\n" "Se encontraron %d errores:\n\n%s") % (
+                updated_count,
+                error_count,
+                "\n".join(error_details[:10]),
+            )
+            if len(error_details) > 10:
+                message += _("\n... y %d errores más") % (len(error_details) - 10)
+            msg_type = "warning"
+            sticky = True
+        else:
+            title = _("✗ Error en la actualización")
+            message = _("No se pudo actualizar ningún contacto.\n" "Errores encontrados:\n\n%s") % "\n".join(
+                error_details[:10]
+            )
+            if len(error_details) > 10:
+                message += _("\n... y %d errores más") % (len(error_details) - 10)
+            msg_type = "danger"
+            sticky = True
+
+        # Recargar vista y mostrar notificación
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": title,
+                "message": message,
+                "type": msg_type,
+                "sticky": sticky,
+                "next": {
+                    "type": "ir.actions.act_window",
+                    "res_model": "res.partner",
+                    "name": _("Contactos"),
+                    "view_mode": "list,form",
+                    "views": [[False, "list"], [False, "form"]],
+                    "target": "current",
+                    "domain": [],
+                    "context": {},
+                },
+            },
+        }
+
     def get_data_from_padron_arca(self):
+        """Get partner data from ARCA Padrón A5.
+
+        Uses get_persona_list method with single CUIT for consistency.
+
+        Returns:
+            dict: Partner values to update
+
+        Raises:
+            UserError: If data cannot be retrieved or parsed
+        """
         self.ensure_one()
         cuit = self.ensure_vat()
 
-        # consultamos a5 ya que extiende a4 y tiene validez de constancia
-        code = "ws_sr_constancia_inscripcion"
-        arcaws = self.env["arcaws"].search([("code", "=", code)], limit=1)
-        if not arcaws:
-            msg = _("No se encontró configuración del servicio de padrón")
-            raise UserError(msg)
-
-        method_id = arcaws.method_ids.filtered(lambda m: m.name == "get_persona")
-        if not method_id:
-            msg = _("No se encontró el método get_persona configurado")
-            raise UserError(msg)
-        method_id.ensure_one()
+        # Obtener servicio y método usando método auxiliar
+        arcaws, method_id = self._get_padron_service_and_method()
 
         error_msg = _(
             "No pudimos actualizar desde padrón ARCA al partner %s (%s).\n"
@@ -190,65 +443,33 @@ class ResPartner(models.Model):
         )
 
         try:
-            res = method_id.call_arca_method(obj=self, extra_values={"cuit": cuit})
-        except Exception as e:
-            raise UserError(error_msg % (self.name, cuit, e))
+            # Llamar con lista de un solo CUIT
+            res = method_id.call_arca_method(obj=self, extra_values={"cuit_list": [cuit]})
 
-        # Log completo para diagnosticar qué datos devuelve ARCA
-        _logger.debug(
-            "=== Respuesta ARCA completa para CUIT %s ===\n"
-            "Claves: %s\n"
-            "nombre: %s\n"
-            "apellido: %s\n"
-            "tipoPersona: %s\n"
-            "direccion: %s\n"
-            "localidad: %s\n"
-            "cod_postal: %s\n"
-            "provincia: %s\n"
-            "imp_iva: %s\n"
-            "impuestos: %s\n"
-            "monotributo: %s\n"
-            "actividades: %s\n"
-            "=== Fin respuesta ARCA ===",
-            cuit,
-            list(res.keys()) if isinstance(res, dict) else type(res),
-            res.get("nombre"),
-            res.get("apellido"),
-            res.get("tipoPersona"),
-            res.get("direccion"),
-            res.get("localidad"),
-            res.get("cod_postal"),
-            res.get("provincia"),
-            res.get("imp_iva"),
-            res.get("impuestos"),
-            res.get("monotributo"),
-            res.get("actividades"),
-        )
+            # Validar y serializar respuesta usando método auxiliar
+            personas = self._validate_and_serialize_arca_response(res, cuit)
+            persona_data = personas[0]
 
-        # Construir denominación desde nombre y apellido
-        nombre = (res.get("nombre") or "").strip()
-        apellido = (res.get("apellido") or "").strip()
-
-        # Para personas jurídicas solo viene nombre, para físicas
-        # nombre+apellido
-        if apellido:
-            denominacion = f"{apellido}, {nombre}"
-        else:
-            denominacion = nombre
-
-        if not denominacion or denominacion == ", ":
-            _logger.warning(
-                "ARCA no devolvió nombre válido para CUIT %s. Claves presentes: %s",
+            # Log para diagnóstico
+            _logger.debug(
+                "=== Respuesta ARCA para CUIT %s ===\n" "Datos generales: %s\n" "=== Fin respuesta ARCA ===",
                 cuit,
-                list(res.keys()) if isinstance(res, dict) else type(res),
+                persona_data.get("datosGenerales", {}),
             )
-            error_detail = "La ARCA no devolvió nombre válido"
-            raise UserError(error_msg % (self.name, cuit, error_detail))
 
-        # Agregar denominación al resultado para parse_census_vals
-        res["denominacion"] = denominacion
-        vals = self.parse_census_vals(res)
-        return vals
+            # Transformar y parsear usando método auxiliar (con title case activado)
+            return self._transform_and_parse_persona_data(persona_data, apply_title_case=True)
+
+        except UserError:
+            # Re-raise UserError sin modificar
+            raise
+        except Exception as e:
+            _logger.warning(
+                "Error obteniendo datos ARCA para CUIT %s: %s",
+                cuit,
+                e,
+            )
+            raise UserError(error_msg % (self.name, cuit, str(e)))
 
     def l10n_ar_fiscal_ws_fe_min_ammount(self):
         for record in self:
