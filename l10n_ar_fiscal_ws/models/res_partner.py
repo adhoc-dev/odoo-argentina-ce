@@ -168,7 +168,7 @@ class ResPartner(models.Model):
             raise UserError(_("No se encontró el método get_persona configurado"))
 
         error_msg = _(
-            "No pudimos actualizar desde padron arca al partner %s (%s).\n"
+            "No pudimos actualizar desde padrón ARCA al partner %s (%s).\n"
             "Recomendamos verificar manualmente en la página de ARCA.\n"
             "Obtuvimos este error: %s"
         )
