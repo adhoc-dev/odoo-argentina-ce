@@ -59,12 +59,16 @@ class ResPartner(models.Model):
             imp_iva = "NI"
 
         vals = {
-            "name": get_value(census, "denominacion"),
             "street": get_value(census, "direccion"),
             "city": get_value(census, "localidad"),
             "zip": get_value(census, "cod_postal"),
             "last_update_census": fields.Date.today(),
         }
+
+        # Solo incluir 'name' si denominacion tiene un valor válido
+        denominacion = get_value(census, "denominacion")
+        if denominacion:
+            vals["name"] = denominacion
 
         # Establecer país Argentina
         country_ar = self.env.ref("base.ar", raise_if_not_found=False)
@@ -137,8 +141,17 @@ class ResPartner(models.Model):
         Returns:
             Dictionary with flat structure expected by parse_census_vals.
         """
+        # Validación defensiva: verificar que persona_data no sea None
+        if not persona_data or not isinstance(persona_data, dict):
+            msg = "ARCA no devolvió datos válidos (persona_data es None o inválido)"
+            raise UserError(_(msg))
+
         # Construir denominación desde nombre y apellido
-        datos_generales = persona_data.get("datosGenerales", {})
+        datos_generales = persona_data.get("datosGenerales") or {}
+        if not isinstance(datos_generales, dict):
+            msg = "ARCA devolvió datos generales inválidos"
+            raise UserError(_(msg))
+
         nombre = (datos_generales.get("nombre") or "").strip()
         apellido = (datos_generales.get("apellido") or "").strip()
         razon_social = (datos_generales.get("razonSocial") or "").strip()
@@ -153,20 +166,39 @@ class ResPartner(models.Model):
             denominacion = nombre
 
         if not denominacion or denominacion == ", ":
-            msg = "ARCA no devolvió nombre válido para esta persona"
-            raise UserError(_(msg))
+            # Log para diagnóstico
+            cuit = datos_generales.get("idPersona", "desconocido")
+            _logger.warning(
+                "ARCA no devolvió nombre válido para CUIT %s. "
+                "Se omitirá actualizar el campo 'name'. datos_generales: %s",
+                cuit,
+                datos_generales,
+            )
+            # No retornar error, simplemente omitir el campo 'name'
+            # Esto permite actualizar otros datos (dirección, impuestos, etc)
+            denominacion = None
 
-        # Transformar estructura anidada a formato plano
-        domicilio = datos_generales.get("domicilioFiscal", {})
+        # Transformar estructura anidada a formato plano con validaciones defensivas
+        domicilio = datos_generales.get("domicilioFiscal") or {}
+        if not isinstance(domicilio, dict):
+            domicilio = {}
+
         datos_monotributo = persona_data.get("datosMonotributo") or {}
+        if not isinstance(datos_monotributo, dict):
+            datos_monotributo = {}
+
         datos_regimen = persona_data.get("datosRegimenGeneral") or {}
+        if not isinstance(datos_regimen, dict):
+            datos_regimen = {}
+
         impuestos_list = datos_regimen.get("impuesto") or []
+        if not isinstance(impuestos_list, list):
+            impuestos_list = []
 
         # Determinar si está inscripto en IVA (impuesto 30)
         imp_iva = "S" if any(imp.get("idImpuesto") == 30 for imp in impuestos_list if isinstance(imp, dict)) else "N"
 
-        return {
-            "denominacion": denominacion,
+        result = {
             "direccion": domicilio.get("direccion", ""),
             "localidad": domicilio.get("localidad", ""),
             "cod_postal": domicilio.get("codPostal", ""),
@@ -175,6 +207,12 @@ class ResPartner(models.Model):
             "imp_iva": imp_iva,
             "tipoPersona": datos_generales.get("tipoPersona", ""),
         }
+
+        # Solo incluir denominacion si tiene un valor válido
+        if denominacion:
+            result["denominacion"] = denominacion
+
+        return result
 
     def _get_padron_service_and_method(self, service_code=None, method_name=None):
         """Obtiene el servicio y método ARCAWS para consultas.
