@@ -306,7 +306,15 @@ class ResPartner(models.Model):
                     len(personas),
                     context_info,
                 )
-            return personas[0]
+            first_persona = personas[0]
+            # Validación adicional para homologación
+            if first_persona is None:
+                _logger.error(
+                    "ARCA devolvió persona None en posición 0 para %s. Respuesta completa: %s",
+                    context_info,
+                    personas,
+                )
+            return first_persona
 
         return personas
 
@@ -539,14 +547,30 @@ class ResPartner(models.Model):
             # Validar y serializar respuesta (single=True retorna directamente)
             persona_data = self._validate_and_serialize_arca_response(res, cuit, single=True)
 
+            # Validación adicional: ARCA en homologación puede devolver estructura vacía
+            if not persona_data or not isinstance(persona_data, dict):
+                _logger.error(
+                    "ARCA devolvió persona_data inválido para CUIT %s: %s (tipo: %s)",
+                    cuit,
+                    persona_data,
+                    type(persona_data),
+                )
+                raise UserError(
+                    _(
+                        "ARCA no devolvió datos válidos para el CUIT %s. "
+                        "Esto puede ocurrir en ambiente de homologación con CUITs de prueba."
+                    )
+                    % cuit
+                )
+
             # Log estructurado solo en modo debug
             if _logger.isEnabledFor(logging.DEBUG):
-                dg = persona_data.get("datosGenerales", {})
-                denominacion = self._build_denominacion(dg)
+                dg = persona_data.get("datosGenerales") or {}
+                denominacion = self._build_denominacion(dg) if isinstance(dg, dict) else None
                 _logger.debug(
                     "ARCA Padrón A5 - CUIT: %s | Tipo: %s | Nombre: %s",
                     cuit,
-                    dg.get("tipoPersona", "?"),
+                    dg.get("tipoPersona") if isinstance(dg, dict) else "?",
                     denominacion or "(sin nombre)",
                 )
 
