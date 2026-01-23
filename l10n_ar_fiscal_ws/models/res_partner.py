@@ -99,7 +99,7 @@ class ResPartner(models.Model):
                 )
                 if state:
                     vals["city"] = "Ciudad Autónoma de Buenos Aires"
-            # Para provincias con localidad (o provincias no-CABA sin localidad)
+            # Para provincias con localidad (o sin localidad si no es CABA)
             elif localidad or not is_caba:
                 state = self.env["res.country.state"].search(
                     [
@@ -119,11 +119,14 @@ class ResPartner(models.Model):
         if partner_fields.get("l10n_ar_afip_responsibility_type_id"):
             try:
                 if imp_iva == "NI" and monotributo == "S":
-                    vals["l10n_ar_afip_responsibility_type_id"] = self.env.ref("l10n_ar.res_RM").id
+                    resp_type = self.env.ref("l10n_ar.res_RM").id
+                    vals["l10n_ar_afip_responsibility_type_id"] = resp_type
                 elif imp_iva == "AC":
-                    vals["l10n_ar_afip_responsibility_type_id"] = self.env.ref("l10n_ar.res_IVARI").id
+                    resp_type = self.env.ref("l10n_ar.res_IVARI").id
+                    vals["l10n_ar_afip_responsibility_type_id"] = resp_type
                 elif imp_iva == "EX":
-                    vals["l10n_ar_afip_responsibility_type_id"] = self.env.ref("l10n_ar.res_IVAE").id
+                    resp_type = self.env.ref("l10n_ar.res_IVAE").id
+                    vals["l10n_ar_afip_responsibility_type_id"] = resp_type
             except Exception as e:
                 msg = "No se pudo establecer tipo de responsabilidad ARCA: %s"
                 _logger.warning(msg, e)
@@ -143,7 +146,7 @@ class ResPartner(models.Model):
         """
         # Validación defensiva: verificar que persona_data no sea None
         if not persona_data or not isinstance(persona_data, dict):
-            msg = "ARCA no devolvió datos válidos (persona_data es None o inválido)"
+            msg = "ARCA no devolvió datos válidos " "(persona_data es None o inválido)"
             raise UserError(_(msg))
 
         # Construir denominación desde nombre y apellido
@@ -178,7 +181,8 @@ class ResPartner(models.Model):
             # Esto permite actualizar otros datos (dirección, impuestos, etc)
             denominacion = None
 
-        # Transformar estructura anidada a formato plano con validaciones defensivas
+        # Transformar estructura anidada a formato plano
+        # con validaciones defensivas
         domicilio = datos_generales.get("domicilioFiscal") or {}
         if not isinstance(domicilio, dict):
             domicilio = {}
@@ -257,14 +261,16 @@ class ResPartner(models.Model):
             UserError: Si la respuesta es inválida o no contiene datos
         """
         if res is None:
-            raise UserError(_("ARCA devolvió respuesta vacía para %s") % context_info)
+            msg = _("ARCA devolvió respuesta vacía para %s")
+            raise UserError(msg % context_info)
 
         # Serializar respuesta Zeep a diccionario Python si es necesario
         if not isinstance(res, dict):
             res = serialize_object(res)
 
         if not res or not isinstance(res, dict):
-            raise UserError(_("Error al serializar respuesta ARCA para %s") % context_info)
+            msg = _("Error al serializar respuesta ARCA para %s")
+            raise UserError(msg % context_info)
 
         # Extraer lista de personas
         personas = res.get("persona", [])
@@ -292,7 +298,7 @@ class ResPartner(models.Model):
         # Aplicar title case si se solicita
         if apply_title_case:
             for key in ("name", "city", "street"):
-                if key in vals and vals[key]:
+                if vals.get(key):
                     vals[key] = vals[key].title()
 
         return vals
@@ -302,7 +308,6 @@ class ResPartner(models.Model):
         self.ensure_one()
         try:
             partner_vals = self.get_data_from_padron_arca()
-            # Title case ya aplicado en get_data_from_padron_arca
             self.write(partner_vals)
 
             # Mostrar notificación de éxito y refrescar la vista
@@ -370,18 +375,30 @@ class ResPartner(models.Model):
 
                 # Validar y serializar respuesta usando método auxiliar
                 try:
-                    personas = self._validate_and_serialize_arca_response(res, f"lote {i//batch_size + 1}")
+                    lote_num = i // batch_size + 1
+                    personas = self._validate_and_serialize_arca_response(res, f"lote {lote_num}")
                 except UserError as ue:
                     error_details.append(str(ue))
                     _logger.error("Error validando respuesta ARCA: %s", ue)
                     continue
 
-                # Crear diccionario CUIT -> datos (filtrar elementos None o inválidos)
-                persona_by_cuit = {
-                    str(p.get("datosGenerales", {}).get("idPersona", "")): p
-                    for p in personas
-                    if p and isinstance(p, dict)
-                }
+                # Crear diccionario CUIT -> datos
+                # (filtrar elementos None o inválidos)
+                persona_by_cuit = {}
+                for p in personas:
+                    if not p or not isinstance(p, dict):
+                        continue
+                    datos_generales = p.get("datosGenerales")
+                    if not datos_generales or not isinstance(datos_generales, dict):
+                        _logger.warning(
+                            "ARCA devolvió persona sin datosGenerales válidos en lote %s: %s",
+                            lote_num,
+                            p,
+                        )
+                        continue
+                    id_persona = datos_generales.get("idPersona")
+                    if id_persona:
+                        persona_by_cuit[str(id_persona)] = p
 
                 # Actualizar cada partner del lote
                 for partner in batch_partners:
@@ -493,7 +510,8 @@ class ResPartner(models.Model):
             persona_data = personas[0] if personas else None
 
             if not persona_data or not isinstance(persona_data, dict):
-                raise UserError(_("ARCA no devolvió datos válidos para el CUIT %s") % cuit)
+                msg = _("ARCA no devolvió datos válidos para el CUIT %s")
+                raise UserError(msg % cuit)
 
             # Log para diagnóstico
             _logger.debug(
@@ -502,8 +520,9 @@ class ResPartner(models.Model):
                 persona_data.get("datosGenerales", {}),
             )
 
-            # Transformar y parsear usando método auxiliar (con title case activado)
-            return self._transform_and_parse_persona_data(persona_data, apply_title_case=True)
+            # Transformar y parsear usando método auxiliar
+            # (sin modificar el casing)
+            return self._transform_and_parse_persona_data(persona_data, apply_title_case=False)
 
         except UserError:
             # Re-raise UserError sin modificar

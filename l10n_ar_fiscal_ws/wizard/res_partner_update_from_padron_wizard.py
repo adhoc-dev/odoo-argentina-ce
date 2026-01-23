@@ -18,7 +18,7 @@ class ResPartnerUpdateFromPadronField(models.TransientModel):
     field = fields.Char()
     old_value = fields.Char()
     new_value = fields.Char()
-    real_value = fields.Char(help="Stores the actual value (ID for Many2one, list for Many2many) to be written")
+    real_value = fields.Char(help="Stores the actual value (ID for Many2one, " "list for Many2many) to be written")
     field_label = fields.Char(compute="_compute_field_label", store=False)
     value_changed = fields.Boolean(compute="_compute_value_changed", store=False)
     change_indicator = fields.Char(compute="_compute_change_indicator", store=False)
@@ -77,10 +77,12 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
     def default_get(self, fields):
         res = super(ResPartnerUpdateFromPadronWizard, self).default_get(fields)
         context = self.env.context
-        if context.get("active_model") == "res.partner" and context.get("active_ids"):
+        is_partner_context = context.get("active_model") == "res.partner" and context.get("active_ids")
+        if is_partner_context:
             partners = self.get_partners()
             if not partners:
-                raise UserError(_("No se encontró ningún partner con CUIT para actualizar"))
+                msg = _("No se encontró ningún partner con CUIT para actualizar")
+                raise UserError(msg)
             elif len(partners) == 1:
                 res["state"] = "selection"
                 res["partner_id"] = partners[0].id
@@ -114,7 +116,11 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
         return self.env["ir.model.fields"].search(self._get_domain())
 
     state = fields.Selection(
-        [("option", "Option"), ("selection", "Selection"), ("finished", "Finished")],
+        [
+            ("option", "Option"),
+            ("selection", "Selection"),
+            ("finished", "Finished"),
+        ],
         readonly=True,
         required=True,
         default="option",
@@ -190,7 +196,8 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
                         if key == "state_id":
                             record = self.env["res.country.state"].browse(int(new_value))
                         elif key == "l10n_ar_afip_responsibility_type_id":
-                            record = self.env["l10n_ar.afip.responsibility.type"].browse(int(new_value))
+                            resp_model = "l10n_ar.afip.responsibility.type"
+                            record = self.env[resp_model].browse(int(new_value))
                         new_value_display = record.display_name if record else str(new_value)
                         new_value_id = int(new_value)
                     else:
@@ -204,7 +211,7 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
                             "field": key,
                             "old_value": old_value_display,
                             "new_value": new_value_display,
-                            "real_value": str(new_value) if new_value else False,
+                            "real_value": (str(new_value) if new_value else False),
                         }
                         lines.append((0, False, line_vals))
                 elif key in ("impuestos_padron", "actividades_padron"):
@@ -240,7 +247,10 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
             if field.field in ("impuestos_padron", "actividades_padron"):
                 value_to_write = field.real_value if field.real_value else field.new_value
                 vals[field.field] = [(6, False, literal_eval(value_to_write))]
-            elif field.field in ("state_id", "l10n_ar_afip_responsibility_type_id"):
+            elif field.field in (
+                "state_id",
+                "l10n_ar_afip_responsibility_type_id",
+            ):
                 # Para Many2one, usar real_value si existe (contiene el ID)
                 value_to_write = field.real_value if field.real_value else field.new_value
                 vals[field.field] = int(value_to_write) if value_to_write else False
