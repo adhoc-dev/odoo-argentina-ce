@@ -254,13 +254,6 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
                 # Para Many2one, usar real_value si existe (contiene el ID)
                 value_to_write = field.real_value if field.real_value else field.new_value
                 vals[field.field] = int(value_to_write) if value_to_write else False
-            else:
-                vals[field.field] = field.new_value
-        self.partner_id.write(vals)
-
-    def automatic_process_cb(self):
-        for partner in self.partner_ids:
-            self.partner_id = partner.id
             self.change_partner()
             self._update()
 
