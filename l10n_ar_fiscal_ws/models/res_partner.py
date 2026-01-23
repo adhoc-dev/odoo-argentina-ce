@@ -26,6 +26,8 @@ class ResPartner(models.Model):
     # Constantes para servicios ARCA - Pueden ser heredadas en módulos custom
     _PADRON_SERVICE_CODE = "ws_sr_constancia_inscripcion"
     _PADRON_METHOD_NAME = "get_persona_list"
+    _PADRON_BATCH_SIZE = 100  # Límite de ARCA para consultas masivas
+    _PADRON_MAX_ERRORS_TO_SHOW = 10  # Mostrar primeros N errores en UI
 
     # Separo esto para poder heredar de otros
     # modulos y extender los datos
@@ -133,6 +135,37 @@ class ResPartner(models.Model):
 
         return vals
 
+    def _build_denominacion(self, datos_generales):
+        """Construye la denominación desde datos ARCA.
+
+        Args:
+            datos_generales: Dict con nombre, apellido, razonSocial
+
+        Returns:
+            str o None: Denominación construida o None si no hay datos válidos
+        """
+        if not isinstance(datos_generales, dict):
+            return None
+
+        nombre = (datos_generales.get("nombre") or "").strip()
+        apellido = (datos_generales.get("apellido") or "").strip()
+        razon_social = (datos_generales.get("razonSocial") or "").strip()
+
+        # Personas jurídicas: solo razonSocial
+        if razon_social:
+            return razon_social
+
+        # Personas físicas: apellido, nombre
+        if apellido:
+            return f"{apellido}, {nombre}" if nombre else apellido
+
+        # Solo nombre sin apellido
+        if nombre:
+            return nombre
+
+        # Sin datos válidos
+        return None
+
     def _transform_arca_persona_to_census(self, persona_data):
         """Transform ARCA persona structure to census format.
 
@@ -155,20 +188,10 @@ class ResPartner(models.Model):
             msg = "ARCA devolvió datos generales inválidos"
             raise UserError(_(msg))
 
-        nombre = (datos_generales.get("nombre") or "").strip()
-        apellido = (datos_generales.get("apellido") or "").strip()
-        razon_social = (datos_generales.get("razonSocial") or "").strip()
+        # Usar método auxiliar para construir denominación
+        denominacion = self._build_denominacion(datos_generales)
 
-        # Para personas jurídicas solo viene razonSocial
-        # Para físicas viene nombre+apellido
-        if razon_social:
-            denominacion = razon_social
-        elif apellido:
-            denominacion = f"{apellido}, {nombre}"
-        else:
-            denominacion = nombre
-
-        if not denominacion or denominacion == ", ":
+        if not denominacion:
             # Log para diagnóstico
             cuit = datos_generales.get("idPersona", "desconocido")
             _logger.warning(
@@ -177,9 +200,6 @@ class ResPartner(models.Model):
                 cuit,
                 datos_generales,
             )
-            # No retornar error, simplemente omitir el campo 'name'
-            # Esto permite actualizar otros datos (dirección, impuestos, etc)
-            denominacion = None
 
         # Transformar estructura anidada a formato plano
         # con validaciones defensivas
@@ -247,15 +267,16 @@ class ResPartner(models.Model):
         method_id.ensure_one()
         return arcaws, method_id
 
-    def _validate_and_serialize_arca_response(self, res, context_info=""):
+    def _validate_and_serialize_arca_response(self, res, context_info="", single=False):
         """Valida y serializa respuesta de servicio ARCA.
 
         Args:
             res: Respuesta del servicio ARCA (puede ser objeto Zeep o dict)
             context_info: Información de contexto para mensajes de error
+            single: Si True, retorna directamente el primer elemento
 
         Returns:
-            list: Lista de personas desde la respuesta
+            list o dict: Lista de personas o persona única si single=True
 
         Raises:
             UserError: Si la respuesta es inválida o no contiene datos
@@ -276,6 +297,24 @@ class ResPartner(models.Model):
         personas = res.get("persona", [])
         if not personas:
             raise UserError(_("ARCA no devolvió datos para %s") % context_info)
+
+        # Retornar primer elemento si se espera uno solo
+        if single:
+            if len(personas) > 1:
+                _logger.warning(
+                    "ARCA devolvió %d personas para %s, esperando 1. Se usará la primera.",
+                    len(personas),
+                    context_info,
+                )
+            first_persona = personas[0]
+            # Validación adicional para homologación
+            if first_persona is None:
+                _logger.error(
+                    "ARCA devolvió persona None en posición 0 para %s. Respuesta completa: %s",
+                    context_info,
+                    personas,
+                )
+            return first_persona
 
         return personas
 
@@ -356,8 +395,8 @@ class ResPartner(models.Model):
         # Obtener servicio y método usando método auxiliar
         arcaws, method_id = self._get_padron_service_and_method()
 
-        # Procesar en lotes de 100 CUITs (límite de ARCA)
-        batch_size = 100
+        # Procesar en lotes (límite de ARCA)
+        batch_size = self._PADRON_BATCH_SIZE
         updated_count = 0
         error_details = []
 
@@ -440,10 +479,10 @@ class ResPartner(models.Model):
             message = _("Se actualizaron %d contactos correctamente.\n" "Se encontraron %d errores:\n\n%s") % (
                 updated_count,
                 error_count,
-                "\n".join(error_details[:10]),
+                "\n".join(error_details[: self._PADRON_MAX_ERRORS_TO_SHOW]),
             )
-            if len(error_details) > 10:
-                message += _("\n... y %d errores más") % (len(error_details) - 10)
+            if len(error_details) > self._PADRON_MAX_ERRORS_TO_SHOW:
+                message += _("\n... y %d errores más") % (len(error_details) - self._PADRON_MAX_ERRORS_TO_SHOW)
             msg_type = "warning"
             sticky = True
         else:
@@ -505,20 +544,35 @@ class ResPartner(models.Model):
             # Llamar con lista de un solo CUIT
             res = method_id.call_arca_method(obj=self, extra_values={"cuit_list": [cuit]})
 
-            # Validar y serializar respuesta usando método auxiliar
-            personas = self._validate_and_serialize_arca_response(res, cuit)
-            persona_data = personas[0] if personas else None
+            # Validar y serializar respuesta (single=True retorna directamente)
+            persona_data = self._validate_and_serialize_arca_response(res, cuit, single=True)
 
+            # Validación adicional: ARCA en homologación puede devolver estructura vacía
             if not persona_data or not isinstance(persona_data, dict):
-                msg = _("ARCA no devolvió datos válidos para el CUIT %s")
-                raise UserError(msg % cuit)
+                _logger.error(
+                    "ARCA devolvió persona_data inválido para CUIT %s: %s (tipo: %s)",
+                    cuit,
+                    persona_data,
+                    type(persona_data),
+                )
+                raise UserError(
+                    _(
+                        "ARCA no devolvió datos válidos para el CUIT %s. "
+                        "Esto puede ocurrir en ambiente de homologación con CUITs de prueba."
+                    )
+                    % cuit
+                )
 
-            # Log para diagnóstico
-            _logger.debug(
-                "=== Respuesta ARCA para CUIT %s ===\n" "Datos generales: %s\n" "=== Fin respuesta ARCA ===",
-                cuit,
-                persona_data.get("datosGenerales", {}),
-            )
+            # Log estructurado solo en modo debug
+            if _logger.isEnabledFor(logging.DEBUG):
+                dg = persona_data.get("datosGenerales") or {}
+                denominacion = self._build_denominacion(dg) if isinstance(dg, dict) else None
+                _logger.debug(
+                    "ARCA Padrón A5 - CUIT: %s | Tipo: %s | Nombre: %s",
+                    cuit,
+                    dg.get("tipoPersona") if isinstance(dg, dict) else "?",
+                    denominacion or "(sin nombre)",
+                )
 
             # Transformar y parsear usando método auxiliar
             # (sin modificar el casing)
