@@ -60,3 +60,9 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+
+# VSCode personal settings (use .vscode/ locally, don't commit)
+.vscode/
+
+# Personal development scripts
+check_pr_ready.sh
