@@ -40,7 +40,7 @@
     "token": connection.token,
     "sign": connection.sign,
     "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
-    "idPersona": int(extra_values.get('cuit', 0)),
+    "idPersona": int(extra_values['cuit']),
 }</field>
         <field name="response_dict">{
     'datosGenerales': ws_res.get("datosGenerales", {}),
@@ -51,7 +51,6 @@
     'domicilioFiscal': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}),
     'direccion': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("direccion", ""),
     'localidad': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("localidad", ""),
-    'codPostal': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("codPostal", ""),
     'cod_postal': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("codPostal", ""),
     'provincia': ws_res.get("datosGenerales", {}).get("domicilioFiscal", {}).get("descripcionProvincia", ""),
     'datosMonotributo': ws_res.get("datosMonotributo") or {},

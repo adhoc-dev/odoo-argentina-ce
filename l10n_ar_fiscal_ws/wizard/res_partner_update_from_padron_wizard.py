@@ -18,7 +18,7 @@ class ResPartnerUpdateFromPadronField(models.TransientModel):
     field = fields.Char()
     old_value = fields.Char()
     new_value = fields.Char()
-    real_value = fields.Char(help="Stores the actual value (ID for Many2one, " "list for Many2many) to be written")
+    real_value = fields.Char(help="Stores the actual value (ID for Many2one, list for Many2many) to be written")
     field_label = fields.Char(compute="_compute_field_label", store=False)
     value_changed = fields.Boolean(compute="_compute_value_changed", store=False)
     change_indicator = fields.Char(compute="_compute_change_indicator", store=False)
@@ -259,6 +259,12 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
 
         if vals:
             self.partner_id.write(vals)
+        else:
+            _logger.info(
+                "No updates were applied for partner %s in wizard %s",
+                self.partner_id.id if self.partner_id else None,
+                self.id,
+            )
 
         self.write({"state": "finished"})
         return {

@@ -129,9 +129,12 @@ class ResPartner(models.Model):
                 elif imp_iva == "EX":
                     resp_type = self.env.ref("l10n_ar.res_IVAE").id
                     vals["l10n_ar_afip_responsibility_type_id"] = resp_type
-            except Exception as e:
+            except (ValueError, UserError, KeyError, AttributeError) as e:
                 msg = "No se pudo establecer tipo de responsabilidad ARCA: %s"
                 _logger.warning(msg, e)
+            except Exception:
+                _logger.exception("Unexpected error al establecer tipo de responsabilidad ARCA")
+                raise
 
         return vals
 
@@ -433,6 +436,7 @@ class ResPartner(models.Model):
 
                 # Actualizar cada partner del lote
                 for partner in batch_partners:
+                    partner_cuit = None
                     try:
                         partner_cuit = partner.ensure_vat()
                         persona_data = persona_by_cuit.get(partner_cuit)
@@ -468,7 +472,7 @@ class ResPartner(models.Model):
             sticky = False
         elif updated_count > 0 and error_count > 0:
             title = _("⚠ Actualización parcial")
-            message = _("Se actualizaron %d contactos correctamente.\n" "Se encontraron %d errores:\n\n%s") % (
+            message = _("Se actualizaron %d contactos correctamente.\nSe encontraron %d errores:\n\n%s") % (
                 updated_count,
                 error_count,
                 "\n".join(error_details[: self._PADRON_MAX_ERRORS_TO_SHOW]),
@@ -479,7 +483,7 @@ class ResPartner(models.Model):
             sticky = True
         else:
             title = _("✗ Error en la actualización")
-            message = _("No se pudo actualizar ningún contacto.\n" "Errores encontrados:\n\n%s") % "\n".join(
+            message = _("No se pudo actualizar ningún contacto.\nErrores encontrados:\n\n%s") % "\n".join(
                 error_details[:10]
             )
             if len(error_details) > 10:

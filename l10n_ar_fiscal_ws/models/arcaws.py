@@ -59,7 +59,7 @@ class ArcaWs(models.Model):
             raise ArcaError(result)
 
     def _compute_dummy_method(self):
-        has_dummy = self.filtered(lambda x: x.method_ids.filtered(lambda m: m.name == "dummy"))
+        has_dummy = self.filtered(lambda x: x.method_ids.filtered(lambda method: method.name == "dummy"))
         has_dummy.dummy_method = True
         (self - has_dummy).dummy_method = False
 
@@ -110,8 +110,8 @@ class ArcaWsMethod(models.Model):
             try:
                 ws_res_serialized = serialize_object(res)
                 _logger.debug("ARCA Response Serialized: %s", ws_res_serialized)
-            except Exception as e:
-                _logger.warning("Could not serialize ARCA response: %s", e)
+            except (TypeError, ValueError, AttributeError) as e:
+                _logger.error("Could not serialize ARCA response: %s", e)
                 ws_res_serialized = res
 
             eval_context["ws_res"] = ws_res_serialized
