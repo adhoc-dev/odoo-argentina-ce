@@ -64,5 +64,11 @@ docs/_build/
 # VSCode personal settings (use .vscode/ locally, don't commit)
 .vscode/
 
-# Personal development scripts
+# Personal development scripts and documentation
 check_pr_ready.sh
+check_before_push.sh
+.github/WORKFLOW.md
+.github/WORKFLOW_COMPLETO.md
+*ANALISIS*.md
+*COMPARACION*.md
+*TESTING*.md
