@@ -26,26 +26,30 @@
                         <field name="update_constancia"/>
                         <field name="title_case"/>
                     </group>
-                    <group invisible="state in ('option', 'finished')" col="1">
-                        <h1>
-                            <field required="state == 'selection'" name="partner_id" options="{'no_open': True}"/>
-                        </h1>
-                        <span>
-                            <field name="field_ids" nolabel="1">
-                                <list create="false" editable="top">
-                                    <field name="field"/>
-                                    <field readonly="True" name="old_value"/>
-                                    <field name="new_value"/>
-                                </list>
-                            </field>
-                        </span>
+                    <group invisible="state in ('option', 'finished')">
+                        <group col="1">
+                            <h1>
+                                <field required="state == 'selection'" name="partner_id" options="{'no_open': True}"/>
+                            </h1>
+                        </group>
+                    </group>
+                    <group invisible="state in ('option', 'finished')">
+                        <field name="field_ids" nolabel="1">
+                            <list create="false" editable="top" decoration-bf="True" decoration-info="True">
+                                <field name="change_indicator" string=" " width="30px"/>
+                                <field name="field" column_invisible="True"/>
+                                <field name="field_label" string="Campo" readonly="True"/>
+                                <field readonly="True" name="old_value" string="Valor Actual" class="text-muted"/>
+                                <field name="new_value" string="Nuevo Valor"/>
+                                <field name="value_changed" column_invisible="True"/>
+                            </list>
+                        </field>
                     </group>
                 </sheet>
                 <footer>
                     <button invisible="state in ('option', 'finished')" class="oe_highlight" name="update_selection" string="Update Selection" type="object"/>
                     <button invisible="state != 'selection'" class="oe_link" name="next_cb" string="Skip these partner" type="object"/>
                     <button invisible="state != 'option'" class="oe_highlight" name="start_process_cb" string="Update with Manual Check" type="object"/>
-                    <button invisible="state != 'option'" class="oe_highlight" confirm="Are you sure to execute the automatic update of your partners ?" name="automatic_process_cb" string="Update Automatically" type="object"/>
                     <span invisible="state == 'finished'" class="or_cancel">or
                         <button class="oe_link oe_inline" special="cancel" string="Cancel"/></span>
                     <span invisible="state != 'finished'" class="or_cancel">
