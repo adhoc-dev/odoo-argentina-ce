@@ -50,7 +50,6 @@
                     <button invisible="state in ('option', 'finished')" class="oe_highlight" name="update_selection" string="Update Selection" type="object"/>
                     <button invisible="state != 'selection'" class="oe_link" name="next_cb" string="Skip these partner" type="object"/>
                     <button invisible="state != 'option'" class="oe_highlight" name="start_process_cb" string="Update with Manual Check" type="object"/>
-                    <button invisible="state != 'option'" class="oe_highlight" confirm="Are you sure to execute the automatic update of your partners ?" name="automatic_process_cb" string="Update Automatically" type="object"/>
                     <span invisible="state == 'finished'" class="or_cancel">or
                         <button class="oe_link oe_inline" special="cancel" string="Cancel"/></span>
                     <span invisible="state != 'finished'" class="or_cancel">

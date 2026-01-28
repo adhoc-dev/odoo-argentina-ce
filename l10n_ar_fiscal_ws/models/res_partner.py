@@ -318,12 +318,11 @@ class ResPartner(models.Model):
 
         return personas
 
-    def _transform_and_parse_persona_data(self, persona_data, apply_title_case=False):
-        """Transforma datos de persona ARCA a valores de partner Odoo.
+    def _transform_and_parse_persona_data(self, persona_data):
+        """Transforma datos de persona ARCA a valores de partner Odoo sin alterar el casing.
 
         Args:
             persona_data: Diccionario con datos de persona desde ARCA
-            apply_title_case: Si True, aplica title case a campos de texto
 
         Returns:
             dict: Valores para actualizar partner
@@ -333,13 +332,6 @@ class ResPartner(models.Model):
         """
         census_data = self._transform_arca_persona_to_census(persona_data)
         vals = self.parse_census_vals(census_data)
-
-        # Aplicar title case si se solicita
-        if apply_title_case:
-            for key in ("name", "city", "street"):
-                if vals.get(key):
-                    vals[key] = vals[key].title()
-
         return vals
 
     def update_from_padron_arca(self):
@@ -576,7 +568,7 @@ class ResPartner(models.Model):
 
             # Transformar y parsear usando método auxiliar
             # (sin modificar el casing)
-            return self._transform_and_parse_persona_data(persona_data, apply_title_case=False)
+            return self._transform_and_parse_persona_data(persona_data)
 
         except UserError:
             # Re-raise UserError sin modificar
