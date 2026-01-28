@@ -1,5 +1,4 @@
 import yaml
-import sys
 from zeep.helpers import serialize_object
 
 
