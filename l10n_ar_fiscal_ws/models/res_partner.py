@@ -21,6 +21,10 @@ class ResPartner(models.Model):
     _PADRON_BATCH_SIZE = 100  # Límite de ARCA para consultas masivas
     _PADRON_MAX_ERRORS_TO_SHOW = 10  # Mostrar primeros N errores en UI
 
+    # Constantes para el servicio de FCE (Factura de Crédito Electrónica)
+    _FECRED_SERVICE_CODE = "wsfecred"
+    _FECRED_METHOD_NAME = "consultar_monto_obligado_recepcion"
+
     mipyme_required = fields.Boolean(
         string="Must credit invoice",
     )
@@ -729,14 +733,39 @@ class ResPartner(models.Model):
             _logger.error(error_msg)
             raise UserError(error_msg)
 
-    def l10n_ar_fiscal_ws_fe_min_ammount(self):
-        for record in self:
-            if record.l10n_ar_vat:
-                ws = self.env.company.arca_get_connection("wsfecred")
-                res = ws.call_arca_service(
-                    "ConsultarMontoObligadoRecepcion",
-                    {"cuitConsultada": record.l10n_ar_vat, "fechaEmision": fields.Date.today()},
-                )
-                return res
-                # record.mipyme_required = True if ws.Resultado == "S" else False
-                # record.mipyme_from_amount = float(res)
+    def check_mipyme_status(self):
+        """Consulta en ARCA si el partner requiere FCE y el monto mínimo."""
+        partners = self.filtered("l10n_ar_vat")
+        if not partners:
+            return
+
+        _arcaws, method = self._get_padron_service_and_method(
+            service_code=self._FECRED_SERVICE_CODE,
+            method_name=self._FECRED_METHOD_NAME,
+        )
+        errors = []
+        for record in partners:
+            try:
+                res = method.call_arca_method(record)
+
+                # Verificar errores en la respuesta ARCA
+                arca_errors = getattr(res, "arrayErrores", None)
+                if arca_errors and getattr(arca_errors, "codigoDescripcion", None):
+                    error_descs = [getattr(e, "descripcion", str(e)) for e in arca_errors.codigoDescripcion]
+                    errors.append(f"{record.l10n_ar_vat}: {', '.join(error_descs)}")
+                    continue
+
+                obligado = getattr(res, "obligado", None)
+                monto_desde = getattr(res, "montoDesde", None)
+
+                record.mipyme_required = obligado == "S"
+                record.mipyme_from_amount = float(monto_desde) if monto_desde is not None else 0.0
+
+            except Exception as e:
+                errors.append(f"{record.l10n_ar_vat}: {e}")
+                _logger.error("Error consultando MiPyme para %s: %s", record.l10n_ar_vat, e)
+
+        if errors:
+            raise UserError(
+                _("Errores al consultar estado MiPyme:\n%s") % "\n".join(errors[: self._PADRON_MAX_ERRORS_TO_SHOW])
+            )

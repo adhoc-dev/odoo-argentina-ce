@@ -5,9 +5,8 @@
 import logging
 from datetime import datetime
 
-from odoo.exceptions import UserError
-
 from odoo import _, fields, models
+from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 

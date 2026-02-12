@@ -53,4 +53,20 @@
         <field name="method_name">dummy</field>
         <field name="definition_dict">{}</field>
     </record>
+
+    <!-- Método consultarMontoObligadoRecepcion - Consulta obligación y monto FCE -->
+    <record id="arcawsfecred_consultar_monto_obligado" model="arcaws.method">
+        <field name="name">consultar_monto_obligado_recepcion</field>
+        <field name="arcaws_id" ref="arcawsfecred"/>
+        <field name="method_name">consultarMontoObligadoRecepcion</field>
+        <field name="definition_dict">{
+    "authRequest": {
+        "token": connection.token,
+        "sign": connection.sign,
+        "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
+    },
+    "cuitConsultada": int(self.ensure_vat()),
+    "fechaEmision": context_today(),
+}</field>
+    </record>
 </odoo>
