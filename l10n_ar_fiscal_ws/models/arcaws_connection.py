@@ -5,7 +5,7 @@
 import logging
 
 from lxml import etree
-from odoo import api, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from zeep import Client
 from zeep.plugins import HistoryPlugin
@@ -82,7 +82,7 @@ class ArcawsConnection(models.Model):
             response = getattr(client.service, method_name)(**data, **kwargs)
         except Exception as error:
             _logger.error("Error calling ARCA service %s: %s", method_name, error)
-            raise UserError(f"Error calling ARCA service {method_name}: {error}")
+            raise UserError(_("Error calling ARCA service %s: %s") % (method_name, error))
 
         # Adjuntar XML request/response para debugging
         if history.last_sent:

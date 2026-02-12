@@ -203,7 +203,7 @@ class ResPartner(models.Model):
                         "Error serializando persona_data: %s",
                         e,
                     )
-                    return {"afip_error": (f"Error al serializar datos ARCA: {e}")}
+                    return {"afip_error": _("Error al serializar datos ARCA: %s") % e}
 
             # Validación defensiva
             if not persona_data or not isinstance(persona_data, dict):
@@ -714,7 +714,7 @@ class ResPartner(models.Model):
                 personas = result.persona if isinstance(result.persona, list) else [result.persona]
 
                 for persona_data in personas:
-                    cuit = str(persona_data.idPersona)
+                    cuit = str(getattr(persona_data, "idPersona", ""))
                     partner = partner_by_cuit.get(cuit)
                     if partner:
                         try:
@@ -722,7 +722,7 @@ class ResPartner(models.Model):
                             partner.write(vals)
                             updated += 1
                         except Exception as e:
-                            error_msg = f"Error actualizando partner {partner.name} (CUIT: {cuit}): {str(e)}"
+                            error_msg = _("Error actualizando partner %s (CUIT: %s): %s") % (partner.name, cuit, str(e))
                             errors.append(error_msg)
                             _logger.error("Error actualizando partner %s (CUIT: %s): %s", partner.name, cuit, e)
 
@@ -733,7 +733,7 @@ class ResPartner(models.Model):
         if errors:
             message += "\n\n" + _("Errores encontrados:") + "\n- " + "\n- ".join(errors[:5])
             if len(errors) > 5:
-                message += f"\n... y {len(errors) - 5} errores más."
+                message += "\n" + _("... y %d errores más.") % (len(errors) - 5)
             notification_type = "warning"
 
         return {

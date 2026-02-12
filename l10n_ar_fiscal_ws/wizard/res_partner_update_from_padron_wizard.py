@@ -305,7 +305,7 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
                     "Campo '%s' no existe en res.partner, se omite de la escritura",
                     f,
                 )
-                del vals[f]
+            vals = {k: v for k, v in vals.items() if k in partner_fields}
 
         if vals:
             self.partner_id.write(vals)
