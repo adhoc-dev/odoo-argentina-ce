@@ -4,10 +4,9 @@
 ##############################################################################
 import logging
 
+from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 from odoo.tools import float_repr, ormcache, safe_eval
-
-from odoo import _, api, fields, models
 
 from .exceptions import ArcaError
 
@@ -22,7 +21,7 @@ class ArcaWs(models.Model):
     code = fields.Char(required=True)
     production_url = fields.Char(required=True)
     homologation_url = fields.Char(required=True)
-    view_id = fields.Many2one("ir.ui.view")
+    view_id = fields.Many2one("ir.ui.view", ondelete="set null")
     dummy_method = fields.Boolean(compute="_compute_dummy_method", store=False)
     method_ids = fields.One2many("arcaws.method", "arcaws_id")
     connection_ids = fields.One2many("arcaws.connection", "arcaws")
@@ -50,7 +49,7 @@ class ArcaWs(models.Model):
 
     def action_dummie(self):
         self.ensure_one()
-        _logger.info("Dummie action called")
+        _logger.debug("Dummie action called")
         company = self.env.company
         method_id = self.method_ids.filtered(lambda m: m.name == "dummy")
         if method_id:
@@ -68,7 +67,7 @@ class ArcaWsMethod(models.Model):
 
     name = fields.Char(required=True)
     arcaws_id = fields.Many2one("arcaws", required=True)
-    model_id = fields.Many2one("ir.model")
+    model_id = fields.Many2one("ir.model", ondelete="set null")
     method_name = fields.Char(required=True)
     definition_dict = fields.Text(default="{}")
     response_dict = fields.Text()

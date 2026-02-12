@@ -11,46 +11,145 @@
         <field name="name">res.partner.update.from.padron.wizard.form</field>
         <field name="model">res.partner.update.from.padron.wizard</field>
         <field name="arch" type="xml">
-            <form string="Update From Padron ARCA">
+            <form string="Actualización Automática desde ARCA">
                 <field invisible="1" name="state"/>
+                <field invisible="1" name="has_afip_error"/>
                 <header/>
                 <sheet>
-                    <group invisible="state != 'finished'" col="1">
-                        <h2>There are no more partners to update for this request...</h2>
+                    <!-- Estado: Finalizado -->
+                    <div invisible="state != 'finished'" class="alert alert-success text-center" role="status">
+                        <h3>
+                            <i class="fa fa-check-circle"/> Actualización completada
+                        </h3>
+                        <p class="mb-0">No hay más partners para actualizar en esta solicitud.</p>
+                    </div>
+
+                    <!-- Estado: Configuración inicial -->
+                    <group invisible="state != 'option'">
+                        <div class="alert alert-info" role="alert">
+                            <p class="mb-0">
+                                <i class="fa fa-info-circle"/> Solo se actualizarán los contactos con CUIT válido.
+                                <br/>Seleccione los campos que desea actualizar desde ARCA.
+                            </p>
+                        </div>
+                        <group>
+                            <field name="field_to_update_ids"
+                                   string="Campos a Actualizar"
+                                   options="{'no_create': True}"
+                                   widget="many2many_tags"/>
+                            <field name="update_constancia" string="Actualizar Constancia"/>
+                            <field name="title_case" string="Formato Título"/>
+                        </group>
                     </group>
-                    <p invisible="state != 'option'" class="oe_grey">Only Partners with cuit are going to be updated.
-                        <br/>
-                        Select the list of fields you want to update.</p>
-                    <group invisible="state not in ('option',)">
-                        <field name="field_to_update_ids" options="{'no_create': True}" widget="many2many_tags"/>
-                        <field name="update_constancia"/>
-                        <field name="title_case"/>
-                    </group>
-                    <group invisible="state in ('option', 'finished')" col="1">
-                        <h1>
-                            <field required="state == 'selection'" name="partner_id" options="{'no_open': True}"/>
-                        </h1>
-                        <span>
-                            <field name="field_ids" nolabel="1">
-                                <list create="false" editable="top">
-                                    <field name="field"/>
-                                    <field readonly="True" name="old_value"/>
-                                    <field name="new_value"/>
+
+                    <!-- Estado: Revisión de cambios -->
+                    <group invisible="state in ('option', 'finished')">
+                        <!-- Header con partner -->
+                        <group col="2" colspan="2">
+                            <group>
+                                <label for="partner_id" string="Contacto a actualizar"/>
+                                <field name="partner_id"
+                                       required="state == 'selection'"
+                                       options="{'no_open': True}"
+                                       nolabel="1"/>
+                            </group>
+                        </group>
+
+                        <!-- Mensaje de advertencia -->
+                        <group colspan="2" invisible="not has_afip_error">
+                            <div class="alert alert-warning" role="alert">
+                                <i class="fa fa-exclamation-triangle"/>
+                                Revise los cambios propuestos. Puede editar los valores antes de aplicar.
+                            </div>
+                        </group>
+
+                        <!-- Tabla de cambios -->
+                        <group colspan="2" invisible="has_afip_error">
+                            <separator string="Cambios Propuestos desde ARCA" colspan="2"/>
+                            <field name="field_ids" nolabel="1" colspan="2">
+                                <list create="false" editable="bottom">
+                                    <field name="field" column_invisible="1"/>
+                                    <field name="field_label" string="Campo" readonly="1"/>
+                                    <field name="old_value" string="Valor Actual" readonly="1"/>
+                                    <field name="new_value" string="Nuevo Valor (ARCA)"/>
                                 </list>
                             </field>
-                        </span>
+                        </group>
+
+                        <!-- Mostrar error de AFIP -->
+                        <group colspan="2" invisible="not has_afip_error">
+                            <div class="alert alert-danger" role="alert">
+                                <h5><i class="fa fa-exclamation-triangle"/> Error de AFIP</h5>
+                                <field name="afip_error" nolabel="1" readonly="1" widget="text" class="text-danger"/>
+                                <p class="mt-2 text-muted">
+                                    <i class="fa fa-info-circle"/>
+                                    Este error proviene directamente del servidor de AFIP.
+                                    Verifique el CUIT en el sitio web de AFIP o contacte al administrador del sistema.
+                                </p>
+                            </div>
+                        </group>
+
+                        <!-- Información de debugging XML -->
+                        <notebook colspan="2" invisible="not xml_request or has_afip_error" groups="base.group_system">
+                            <page string="XML Enviado a ARCA">
+                                <field name="xml_request" widget="ace" options="{'mode': 'xml'}" nolabel="1"/>
+                            </page>
+                            <page string="XML Recibido de ARCA">
+                                <field name="xml_response" widget="ace" options="{'mode': 'xml'}" nolabel="1"/>
+                            </page>
+                        </notebook>
+
+                        <!-- Mensaje de estado -->
+                        <group colspan="2" invisible="not field_ids or has_afip_error">
+                            <div class="alert alert-success" role="alert">
+                                <i class="fa fa-check-circle"/> Se detectaron cambios. Revise antes de aplicar.
+                            </div>
+                        </group>
+                        <group colspan="2" invisible="field_ids or has_afip_error">
+                            <div class="alert alert-info" role="alert">
+                                <i class="fa fa-info-circle"/> No hay cambios. Los datos coinciden con ARCA.
+                            </div>
+                        </group>
                     </group>
                 </sheet>
                 <footer>
-                    <button invisible="state in ('option', 'finished')" class="oe_highlight" name="update_selection" string="Update Selection" type="object"/>
-                    <button invisible="state != 'selection'" class="oe_link" name="next_cb" string="Skip these partner" type="object"/>
-                    <button invisible="state != 'option'" class="oe_highlight" name="start_process_cb" string="Update with Manual Check" type="object"/>
-                    <button invisible="state != 'option'" class="oe_highlight" confirm="Are you sure to execute the automatic update of your partners ?" name="automatic_process_cb" string="Update Automatically" type="object"/>
-                    <span invisible="state == 'finished'" class="or_cancel">or
-                        <button class="oe_link oe_inline" special="cancel" string="Cancel"/></span>
-                    <span invisible="state != 'finished'" class="or_cancel">
-                        <button class="oe_link oe_inline" special="cancel" string="Close"/>
-                    </span>
+                    <!-- Botones para estado 'selection' -->
+                    <button invisible="state in ('option', 'finished') or has_afip_error"
+                            class="btn-primary"
+                            name="update_selection"
+                            string="Aplicar Cambios"
+                            type="object"
+                            icon="fa-check"/>
+                    <button invisible="state != 'selection'"
+                            name="next_cb"
+                            string="Omitir este contacto"
+                            type="object"
+                            icon="fa-forward"/>
+
+                    <!-- Botones para estado 'option' -->
+                    <button invisible="state != 'option'"
+                            class="btn-primary"
+                            name="start_process_cb"
+                            string="Actualizar con Revisión Manual"
+                            type="object"
+                            icon="fa-edit"/>
+                    <button invisible="state != 'option'"
+                            class="btn-success"
+                            confirm="¿Está seguro de ejecutar la actualización automática de todos sus contactos?"
+                            name="automatic_process_cb"
+                            string="Actualizar Automáticamente"
+                            type="object"
+                            icon="fa-bolt"/>
+
+                    <!-- Botones de cancelar/cerrar -->
+                    <button invisible="state == 'finished'"
+                            special="cancel"
+                            string="Cancelar"
+                            class="btn-secondary"/>
+                    <button invisible="state != 'finished'"
+                            special="cancel"
+                            string="Cerrar"
+                            class="btn-secondary"/>
                 </footer>
             </form>
         </field>

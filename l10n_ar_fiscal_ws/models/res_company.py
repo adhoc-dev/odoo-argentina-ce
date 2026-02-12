@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.serialization import pkcs7
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from zeep import Client
+from zeep.exceptions import Fault
 
 _logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class ResCompany(models.Model):
                 environment_type = "production"
             else:
                 environment_type = "homologation"
-        _logger.info("Running arg electronic invoice on %s mode" % environment_type)
+        _logger.debug("Running arg electronic invoice on %s mode", environment_type)
         return environment_type
 
     def get_key_and_certificate(self, environment_type):
@@ -103,7 +104,7 @@ class ResCompany(models.Model):
         if certificate:
             pkey = certificate.alias_id.key
             cert = certificate.crt
-            _logger.info("Using DB certificates")
+            _logger.debug("Using DB certificates")
         # not certificate on bd, we searpytzch on odo conf file
         else:
             msg = _("Not confirmed certificate for %s on company %s") % (
@@ -129,7 +130,7 @@ class ResCompany(models.Model):
                 except Exception:
                     msg = "Could not read %s or %s files" % (pkey_path, cert_path)
                 else:
-                    _logger.info("Using odoo conf certificates")
+                    _logger.debug("Using odoo conf certificates")
         if not pkey or not cert:
             raise UserError(msg)
         cert = x509.load_pem_x509_certificate(cert.encode("utf-8"))
@@ -138,7 +139,7 @@ class ResCompany(models.Model):
 
     def arca_get_connection(self, arcaws):
         self.ensure_one()
-        _logger.info("Getting connection for company %s and ws %s" % (self.name, arcaws))
+        _logger.debug("Getting connection for company %s and ws %s", self.name, arcaws)
         now = fields.Datetime.now()
         environment_type = self._get_environment_type()
 
@@ -161,9 +162,11 @@ class ResCompany(models.Model):
 
     def _arca_create_connection(self, arcaws, environment_type):
         self.ensure_one()
-        _logger.info(
-            "Creating connection for company %s, environment type %s and ws "
-            "%s" % (self.name, environment_type, arcaws)
+        _logger.debug(
+            "Creating connection for company %s, environment type %s and ws %s",
+            self.name,
+            environment_type,
+            arcaws,
         )
 
         login_url = self.env["arcaws"].get_arca_url("LoginCms", environment_type)
@@ -192,8 +195,33 @@ class ResCompany(models.Model):
         sign_tra = base64.b64encode(signed_data).decode("utf-8")
 
         client = Client(login_url)
-        response = getattr(client.service, "loginCms")(sign_tra)
-        _logger.info("Successful Connection to ARCA.")
+        try:
+            response = getattr(client.service, "loginCms")(sign_tra)
+            _logger.debug("Successful Connection to ARCA.")
+        except Fault as fault:
+            error_msg = str(fault)
+            _logger.error("ARCA/AFIP connection error: %s", error_msg)
+
+            # Errores específicos de autorización
+            if "Computador no autorizado" in error_msg or "no autorizado a acceder" in error_msg:
+                raise UserError(
+                    _(
+                        "❌ Certificado no autorizado en AFIP/ARCA\n\n"
+                        "El certificado digital no está autorizado para acceder al servicio.\n\n"
+                        "Pasos para resolver:\n"
+                        "1. Ingrese a https://www.afip.gob.ar/ws/\n"
+                        "2. Vaya a 'Administrador de Relaciones de Clave Fiscal'\n"
+                        "3. Autorice el certificado para el servicio '%s'\n"
+                        "4. Espere unos minutos y vuelva a intentar\n\n"
+                        "CUIT: %s\n"
+                        "Ambiente: %s"
+                    )
+                    % (arcaws, self.partner_id.vat or "No definido", environment_type)
+                )
+            # Otros errores de SOAP/AFIP
+            else:
+                raise UserError(_("Error de conexión con AFIP/ARCA:\n\n%s") % error_msg)
+
         auth_data = self._arca_parse_login(response)
         auth_data.update(
             {

@@ -6,26 +6,47 @@
         <field name="production_url">https://wsaa.afip.gov.ar/ws/services/LoginCms?wsdl</field>
         <field name="homologation_url">https://wsaahomo.afip.gov.ar/ws/services/LoginCms?wsdl</field>
     </record>
+    <!-- SERVICIO: Constancia de Inscripción (antes Padrón A5) -->
     <record id="arca_padron_a5" model="arcaws">
-        <field name="name">Padron </field>
-        <field name="code">ws_sr_padron_a5</field>
+        <field name="name">Constancia de Inscripción</field>
+        <field name="code">ws_sr_constancia_inscripcion</field>
         <field name="ws_parameters" eval="{'dummy_method': 'dummy'}"></field>
         <field name="production_url">https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
         <field name="homologation_url">https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5?wsdl</field>
     </record>
+
     <record id="arcawsfecred" model="arcaws">
         <field name="name">Factura credito electronica</field>
         <field name="code">wsfecred</field>
-        <field name="ws_parameters" eval="{'dummy_method': 'dudummy'}"></field>
-        <field name="production_url">https://fwshomo.afip.gov.ar/wsfecred/FECredService?wsdl</field>
-        <field name="homologation_url">https://serviciosjava.afip.gob.ar/wsfecred/FECredService?wsdl</field>
+        <field name="ws_parameters" eval="{'dummy_method': 'dummy'}"></field>
+        <field name="production_url">https://serviciosjava.afip.gob.ar/wsfecred/FECredService?wsdl</field>
+        <field name="homologation_url">https://fwshomo.afip.gov.ar/wsfecred/FECredService?wsdl</field>
     </record>
+    <!-- MÉTODOS: Constancia de Inscripción -->
+
+    <!-- Método dummy para testing -->
     <record id="arca_padron_a5_method" model="arcaws.method">
         <field name="name">dummy</field>
         <field name="arcaws_id" ref="arca_padron_a5"/>
         <field name="method_name">dummy</field>
         <field name="definition_dict">{}</field>
     </record>
+
+    <!-- Método getPersonaList_v2 - Consulta individual y masiva -->
+    <record id="arca_constancia_inscripcion_get_persona_list" model="arcaws.method">
+        <field name="name">get_persona_list</field>
+        <field name="arcaws_id" ref="arca_padron_a5"/>
+        <field name="method_name">getPersonaList_v2</field>
+        <field name="definition_dict">{
+    "token": connection.token,
+    "sign": connection.sign,
+    "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
+    "idPersona": [int(cuit) for cuit in extra_values.get('cuit_list', [self.ensure_vat()])],
+}</field>
+        <field name="response_dict"></field>
+    </record>
+
+    <!-- MÉTODOS: wsfecred -->
     <record id="arcawsfecred_method" model="arcaws.method">
         <field name="name">dummy</field>
         <field name="arcaws_id" ref="arcawsfecred"/>
