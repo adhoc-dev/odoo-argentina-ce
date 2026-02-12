@@ -287,7 +287,7 @@ class ResPartner(models.Model):
 
         arcaws = self.env["arcaws"].search([("code", "=", code)], limit=1)
         if not arcaws:
-            msg = _("No se encontró configuración del servicio de padrón")
+            msg = _("No se encontró configuración para el servicio '%s'") % code
             raise UserError(msg)
 
         method_id = arcaws.method_ids.filtered(lambda m: m.name == method)
@@ -447,7 +447,15 @@ class ResPartner(models.Model):
         'afip_error' en lugar de lanzar una UserError.
         """
         self.ensure_one()
-        cuit = self.ensure_vat()
+        try:
+            cuit = self.ensure_vat()
+        except UserError as e:
+            _logger.error("CUIT inválido o faltante para partner %s: %s", self.name, e)
+            return {
+                "afip_error": str(e),
+                "xml_request": "",
+                "xml_response": "",
+            }
         company = self.env.company
 
         # 1) Obtener servicio y método
@@ -642,9 +650,9 @@ class ResPartner(models.Model):
             raise UserError(error_msg % (self.name, cuit, str(e)))
 
     def update_multiple_from_padron_arca(self):
-        """Actualiza múltiples partners desde AFIP en una sola llamada.
+        """Actualiza múltiples partners desde AFIP en lotes.
 
-        Usando getPersonaList_v2
+        Usando getPersonaList_v2, procesando en lotes de _PADRON_BATCH_SIZE.
 
         Returns:
             dict: Notificación con resultado de la operación
@@ -684,13 +692,23 @@ class ResPartner(models.Model):
                 _("El método 'get_persona_list' no está configurado para el servicio de Constancia de Inscripción")
             )
 
-        try:
-            # Llamar al servicio con la lista completa de CUITs
-            result = method.call_arca_method(self[0], company_id=company, extra_values={"cuit_list": cuit_list})
+        # Procesar en lotes para respetar el límite de ARCA (_PADRON_BATCH_SIZE)
+        updated = 0
+        errors = []
 
-            # Procesar resultados
-            updated = 0
-            errors = []
+        for start in range(0, len(cuit_list), self._PADRON_BATCH_SIZE):
+            batch_cuits = cuit_list[start : start + self._PADRON_BATCH_SIZE]
+            try:
+                result = method.call_arca_method(self[0], company_id=company, extra_values={"cuit_list": batch_cuits})
+            except Exception as batch_exc:
+                error_msg = _("Error al consultar ARCA para lote %d-%d: %s") % (
+                    start + 1,
+                    min(start + self._PADRON_BATCH_SIZE, len(cuit_list)),
+                    str(batch_exc),
+                )
+                errors.append(error_msg)
+                _logger.error(error_msg)
+                continue
 
             if result and hasattr(result, "persona"):
                 personas = result.persona if isinstance(result.persona, list) else [result.persona]
@@ -700,7 +718,7 @@ class ResPartner(models.Model):
                     partner = partner_by_cuit.get(cuit)
                     if partner:
                         try:
-                            vals = partner.parse_census_vals(persona_data)
+                            vals = partner._transform_and_parse_persona_data(persona_data)
                             partner.write(vals)
                             updated += 1
                         except Exception as e:
@@ -708,30 +726,25 @@ class ResPartner(models.Model):
                             errors.append(error_msg)
                             _logger.error("Error actualizando partner %s (CUIT: %s): %s", partner.name, cuit, e)
 
-            # Notificar resultado
-            message = _("Se actualizaron %d de %d partners correctamente") % (updated, len(cuit_list))
-            notification_type = "success" if updated > 0 else "warning"
+        # Notificar resultado
+        message = _("Se actualizaron %d de %d partners correctamente") % (updated, len(cuit_list))
+        notification_type = "success" if updated > 0 else "warning"
 
-            if errors:
-                message += "\n\n" + _("Errores encontrados:") + "\n- " + "\n- ".join(errors[:5])
-                if len(errors) > 5:
-                    message += f"\n... y {len(errors) - 5} errores más."
-                notification_type = "warning"
+        if errors:
+            message += "\n\n" + _("Errores encontrados:") + "\n- " + "\n- ".join(errors[:5])
+            if len(errors) > 5:
+                message += f"\n... y {len(errors) - 5} errores más."
+            notification_type = "warning"
 
-            return {
-                "type": "ir.actions.client",
-                "tag": "display_notification",
-                "params": {
-                    "message": message,
-                    "type": notification_type,
-                    "sticky": False,
-                },
-            }
-
-        except Exception as e:
-            error_msg = _("Error al consultar ARCA: %s") % str(e)
-            _logger.error(error_msg)
-            raise UserError(error_msg)
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "message": message,
+                "type": notification_type,
+                "sticky": False,
+            },
+        }
 
     def check_mipyme_status(self):
         """Consulta en ARCA si el partner requiere FCE y el monto mínimo."""

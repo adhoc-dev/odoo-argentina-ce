@@ -56,7 +56,7 @@
                         </group>
 
                         <!-- Mensaje de advertencia -->
-                        <group colspan="2" invisible="not has_afip_error">
+                        <group colspan="2" invisible="has_afip_error">
                             <div class="alert alert-warning" role="alert">
                                 <i class="fa fa-exclamation-triangle"/>
                                 Revise los cambios propuestos. Puede editar los valores antes de aplicar.

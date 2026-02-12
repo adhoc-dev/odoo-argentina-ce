@@ -23,13 +23,18 @@ class ResPartnerUpdateFromPadronField(models.TransientModel):
 
     @api.depends("field")
     def _compute_field_label(self):
-        """Obtiene el label legible del campo técnico"""
+        """Obtiene el label legible del campo técnico sin N+1 consultas."""
+        field_names = {rec.field for rec in self if rec.field}
+        descriptions_by_name = {}
+        if field_names:
+            fields_data = self.env["ir.model.fields"].search_read(
+                [("model", "=", "res.partner"), ("name", "in", list(field_names))],
+                ["name", "field_description"],
+            )
+            descriptions_by_name = {fd["name"]: fd["field_description"] for fd in fields_data if fd.get("name")}
         for rec in self:
             if rec.field:
-                field_obj = self.env["ir.model.fields"].search(
-                    [("model", "=", "res.partner"), ("name", "=", rec.field)], limit=1
-                )
-                rec.field_label = field_obj.field_description if field_obj else rec.field
+                rec.field_label = descriptions_by_name.get(rec.field, rec.field)
             else:
                 rec.field_label = ""
 
@@ -181,8 +186,15 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
             # Excluir campos XML y de metadatos internos
             excluded_fields = {"xml_request", "xml_response", "afip_error"}
 
+            # Filtrar por campos seleccionados por el usuario
+            selected_field_names = set(self.field_to_update_ids.mapped("name"))
+
             for key, new_value in partner_vals.items():
                 if key in excluded_fields:
+                    continue
+
+                # Si hay campos seleccionados, solo mostrar esos
+                if selected_field_names and key not in selected_field_names:
                     continue
 
                 # Obtener valor actual del partner
