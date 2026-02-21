@@ -2,6 +2,8 @@
 # For copyright and license notices, see __manifest__.py file in module root
 # directory
 ##############################################################################
+import logging
+
 from odoo import _, api, fields, models
 from odoo.exceptions import ValidationError
 
@@ -9,7 +11,6 @@ try:
     from OpenSSL import crypto
 except ImportError:
     crypto = None
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -172,16 +173,16 @@ class ArcawsCertificateAlias(models.Model):
         """
         for record in self:
             req = crypto.X509Req()
-            req.get_subject().C = self.country_id.code.encode("ascii", "ignore")
-            if self.state_id:
-                req.get_subject().ST = self.state_id.name.encode("ascii", "ignore")
-            req.get_subject().L = self.city.encode("ascii", "ignore")
-            req.get_subject().O = self.company_id.name.encode("ascii", "ignore")
-            req.get_subject().OU = self.department.encode("ascii", "ignore")
-            req.get_subject().CN = self.common_name.encode("ascii", "ignore")
-            req.get_subject().serialNumber = "CUIT %s" % self.cuit.encode("ascii", "ignore")
-            k = crypto.load_privatekey(crypto.FILETYPE_PEM, self.key)
-            self.key = crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
+            req.get_subject().C = record.country_id.code.encode("ascii", "ignore")
+            if record.state_id:
+                req.get_subject().ST = record.state_id.name.encode("ascii", "ignore")
+            req.get_subject().L = record.city.encode("ascii", "ignore")
+            req.get_subject().O = record.company_id.name.encode("ascii", "ignore")
+            req.get_subject().OU = record.department.encode("ascii", "ignore")
+            req.get_subject().CN = record.common_name.encode("ascii", "ignore")
+            req.get_subject().serialNumber = "CUIT %s" % record.cuit.encode("ascii", "ignore")
+            k = crypto.load_privatekey(crypto.FILETYPE_PEM, record.key)
+            record.key = crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
             req.set_pubkey(k)
             req.sign(k, "sha256")
             csr = crypto.dump_certificate_request(crypto.FILETYPE_PEM, req)
@@ -189,7 +190,7 @@ class ArcawsCertificateAlias(models.Model):
                 "csr": csr,
                 "alias_id": record.id,
             }
-            self.certificate_ids.create(vals)
+            record.certificate_ids.create(vals)
         return True
 
     @api.constrains("common_name")

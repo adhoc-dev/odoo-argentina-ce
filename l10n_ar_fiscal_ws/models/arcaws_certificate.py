@@ -2,6 +2,9 @@
 # For copyright and license notices, see __manifest__.py file in module root
 # directory
 ##############################################################################
+import base64
+import logging
+
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
@@ -9,8 +12,6 @@ try:
     from OpenSSL import crypto
 except ImportError:
     crypto = None
-import base64
-import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ class ArcawsCertificate(models.Model):
         for rec in self:
             rec.request_filename = "request.csr"
             if rec.csr:
-                rec.request_file = base64.encodebytes(self.csr.encode("utf-8"))
+                rec.request_file = base64.encodebytes(rec.csr.encode("utf-8"))
             else:
                 rec.request_file = False
 

@@ -5,11 +5,10 @@
 import logging
 
 from lxml import etree
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 from zeep import Client
 from zeep.plugins import HistoryPlugin
-
-from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
@@ -53,7 +52,8 @@ class ArcawsConnection(models.Model):
     )
     arcaws = fields.Many2one(
         "arcaws",
-        # required=True,
+        required=True,
+        ondelete="cascade",
     )
 
     @api.depends("type", "arcaws")
@@ -66,14 +66,25 @@ class ArcawsConnection(models.Model):
         return str(self.env["ir.ui.view"]._render_template(template_name, qcontext)).strip()
 
     def call_arca_service(self, method_name, data, **kwargs):
+        """Llama a un servicio ARCA/AFIP con los parámetros especificados
+
+        Args:
+            method_name: Nombre del método del webservice
+            data: Diccionario con los parámetros del método (ya incluye token, sign, etc si aplica)
+            **kwargs: Parámetros adicionales (legacy, no recomendado usar)
+        """
         self.ensure_one()
         history = HistoryPlugin()
-        _logger.info(f"Calling ARCA service {method_name}")
+        _logger.debug("Calling ARCA service %s", method_name)
         try:
             client = Client(self.arcaws_url, plugins=[history])
+            # Los parámetros ya vienen preparados desde el definition_dict del método
             response = getattr(client.service, method_name)(**data, **kwargs)
         except Exception as error:
-            raise UserError(f"Error calling ARCA service {method_name}: {error}")
+            _logger.error("Error calling ARCA service %s: %s", method_name, error)
+            raise UserError(_("Error calling ARCA service %s: %s") % (method_name, error))
+
+        # Adjuntar XML request/response para debugging
         if history.last_sent:
             envelope_req = history.last_sent["envelope"]
             response.xml_request = etree.tostring(envelope_req, pretty_print=True, encoding="unicode")
@@ -96,7 +107,7 @@ class ArcawsConnection(models.Model):
 
     def _arca_post_xml(self, method_name, raw_xml, **kwargs):
         self.ensure_one()
-        _logger.info(f"Calling ARCA service {method_name}")
+        _logger.debug("Calling ARCA service %s", method_name)
 
         client = Client(self.arcaws_url)
         endpoint_url = client.service._binding_options["address"]

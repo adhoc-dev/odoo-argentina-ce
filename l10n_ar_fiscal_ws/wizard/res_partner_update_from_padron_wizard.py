@@ -15,9 +15,28 @@ class ResPartnerUpdateFromPadronField(models.TransientModel):
         "res.partner.update.from.padron.wizard",
         "Wizard",
     )
-    field = fields.Char("name")
-    old_value = fields.Char("old Value")
-    new_value = fields.Char("new Value")
+    field = fields.Char("Field Name", help="Technical field name")
+    field_label = fields.Char(compute="_compute_field_label", store=False)
+    old_value = fields.Char()
+    new_value = fields.Char()
+    real_value = fields.Char(help="Actual value to be written (ID for Many2one, etc)")
+
+    @api.depends("field")
+    def _compute_field_label(self):
+        """Obtiene el label legible del campo técnico sin N+1 consultas."""
+        field_names = {rec.field for rec in self if rec.field}
+        descriptions_by_name = {}
+        if field_names:
+            fields_data = self.env["ir.model.fields"].search_read(
+                [("model", "=", "res.partner"), ("name", "in", list(field_names))],
+                ["name", "field_description"],
+            )
+            descriptions_by_name = {fd["name"]: fd["field_description"] for fd in fields_data if fd.get("name")}
+        for rec in self:
+            if rec.field:
+                rec.field_label = descriptions_by_name.get(rec.field, rec.field)
+            else:
+                rec.field_label = ""
 
 
 class ResPartnerUpdateFromPadronWizard(models.TransientModel):
@@ -38,7 +57,7 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
 
     @api.model
     def default_get(self, fields):
-        res = super(ResPartnerUpdateFromPadronWizard, self).default_get(fields)
+        res = super().default_get(fields)
         context = self.env.context
         if context.get("active_model") == "res.partner" and context.get("active_ids"):
             partners = self.get_partners()
@@ -56,7 +75,11 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
             "street",
             "city",
             "zip",
+            "state_id",
+            "country_id",
             "l10n_ar_afip_responsibility_type_id",
+            "imp_iva_padron",
+            "imp_ganancias_padron",
             "last_update_census",
         ]
         return [
@@ -117,47 +140,183 @@ class ResPartnerUpdateFromPadronWizard(models.TransientModel):
         domain=_get_domain,
         required=True,
     )
+    xml_request = fields.Text(string="XML Enviado", readonly=True, help="XML enviado a ARCA en la última consulta")
+    xml_response = fields.Text(
+        string="XML Recibido", readonly=True, help="XML recibido desde ARCA en la última consulta"
+    )
+    afip_error = fields.Text(string="Error de ARCA", readonly=True, help="Error devuelto por ARCA en la consulta")
+    has_afip_error = fields.Boolean(
+        string="Tiene Error ARCA", readonly=True, help="Indica si hubo un error específico de ARCA"
+    )
 
     @api.onchange("partner_id")
     def change_partner(self):
+        """Obtiene datos de ARCA y genera la comparación de campos"""
         self.ensure_one()
-        self.field_ids.unlink()
+        self.field_ids = [(5, 0, 0)]  # Limpiar registros existentes
+
+        # Limpiar errores previos
+        self.afip_error = False
+        self.has_afip_error = False
+        self.xml_request = ""
+        self.xml_response = ""
+
         partner = self.partner_id
-        fields_names = self.field_to_update_ids.mapped("name")
-        if partner:
-            partner_vals = partner.get_data_from_padron_arca()
+
+        if not partner:
+            return
+
+        try:
+            # Obtener datos desde AFIP
+            partner_vals = partner.get_data_from_padron_arca_safe()
+
+            # Verificar si hubo error de AFIP
+            if partner_vals.get("afip_error"):
+                self.afip_error = partner_vals["afip_error"]
+                self.has_afip_error = True
+                self.xml_request = partner_vals.get("xml_request", "")
+                self.xml_response = partner_vals.get("xml_response", "")
+                return
+
+            # Guardar XMLs para debugging
+            self.xml_request = partner_vals.get("xml_request", "")
+            self.xml_response = partner_vals.get("xml_response", "")
+
             lines = []
-            fields_names = list(set(partner_vals) & set(fields_names))
-            for key in fields_names:
-                old_value = partner[key]
-                new_value = partner_vals[key]
-                if new_value == "":
-                    new_value = False
-                if self.title_case and key in ("name", "city", "street"):
-                    new_value = new_value and new_value.title()
-                if key in ("impuestos_padron", "actividades_padron"):
-                    old_value = old_value.ids
-                elif key in ("state_id", "l10n_ar_arca_responsibility_type_id"):
-                    old_value = old_value.id
-                if new_value and key in fields_names and old_value != new_value:
-                    line_vals = {
-                        "wizard_id": self.id,
-                        "field": key,
-                        "old_value": old_value,
-                        "new_value": new_value or False,
-                    }
-                    lines.append((0, False, line_vals))
+            # Excluir campos XML y de metadatos internos
+            excluded_fields = {"xml_request", "xml_response", "afip_error"}
+
+            # Filtrar por campos seleccionados por el usuario
+            selected_field_names = set(self.field_to_update_ids.mapped("name"))
+
+            for key, new_value in partner_vals.items():
+                if key in excluded_fields:
+                    continue
+
+                # Si hay campos seleccionados, solo mostrar esos
+                if selected_field_names and key not in selected_field_names:
+                    continue
+
+                # Obtener valor actual del partner
+                try:
+                    if hasattr(partner, key) and key in partner._fields:
+                        old_value = partner[key]
+                    else:
+                        old_value = None
+                except Exception:
+                    old_value = None
+
+                # Aplicar title case si corresponde
+                if self.title_case and key in ("name", "city", "street") and new_value:
+                    new_value = new_value.title()
+
+                # Formatear valores para mostrar
+                if key in ("state_id", "l10n_ar_afip_responsibility_type_id"):
+                    old_value_display = old_value.name if old_value else ""
+                    if new_value:
+                        try:
+                            new_record = self.env[partner._fields[key].comodel_name].browse(int(new_value))
+                            new_value_display = new_record.name if new_record.exists() else str(new_value)
+                        except (ValueError, TypeError):
+                            new_value_display = str(new_value)
+                    else:
+                        new_value_display = ""
+                elif key in ("impuestos_padron", "actividades_padron"):
+                    old_value_display = str(old_value.ids) if old_value else "[]"
+                    new_value_display = str(new_value) if new_value else "[]"
+                else:
+                    old_value_display = str(old_value) if old_value else ""
+                    new_value_display = str(new_value) if new_value else ""
+
+                # Agregar TODOS los campos devueltos por ARCA
+                line_vals = {
+                    "wizard_id": self.id,
+                    "field": key,
+                    "old_value": old_value_display,
+                    "new_value": new_value_display,
+                    "real_value": str(new_value) if new_value is not None else "",
+                }
+                lines.append((0, 0, line_vals))
+
             self.field_ids = lines
 
+        except Exception as e:
+            _logger.error("Error al obtener datos de AFIP para %s: %s", partner.name, e, exc_info=True)
+            raise
+
     def _update(self):
+        """Aplica los cambios seleccionados al partner"""
         self.ensure_one()
+
+        if not self.field_ids:
+            return {"type": "ir.actions.act_window_close"}
+
+        # Construir diccionario de valores a actualizar desde los field_ids
         vals = {}
-        for field in self.field_ids:
-            if field.field in ("impuestos_padron", "actividades_padron"):
-                vals[field.field] = [(6, False, literal_eval(field.new_value))]
+
+        for field_line in self.field_ids:
+            field_name = field_line.field
+            new_val = field_line.new_value
+
+            # Aplicar title case si está activado
+            if self.title_case and field_name in ("name", "city", "street") and new_val:
+                new_val = new_val.title()
+
+            # Manejar campos relacionales
+            if field_name in ("impuestos_padron", "actividades_padron"):
+                if field_line.real_value:
+                    try:
+                        ids_list = literal_eval(field_line.real_value)
+                        vals[field_name] = [(6, 0, ids_list)]
+                    except Exception:
+                        vals[field_name] = [(6, 0, [])]
+            elif field_name in ("state_id", "country_id", "l10n_ar_afip_responsibility_type_id"):
+                # Para Many2one, usar real_value (debería ser ID numérico)
+                value_to_write = field_line.real_value if field_line.real_value else new_val
+                if value_to_write:
+                    try:
+                        vals[field_name] = int(value_to_write)
+                    except (ValueError, TypeError):
+                        # Si no es un ID numérico, buscar el registro por nombre
+                        comodel = self.env["res.partner"]._fields[field_name].comodel_name
+                        record = self.env[comodel].search(
+                            [("name", "ilike", value_to_write)],
+                            limit=1,
+                        )
+                        vals[field_name] = record.id if record else False
+                        if not record:
+                            _logger.warning(
+                                "No se encontró registro %s con nombre '%s' para campo %s",
+                                comodel,
+                                value_to_write,
+                                field_name,
+                            )
+                else:
+                    vals[field_name] = False
             else:
-                vals[field.field] = field.new_value
-        self.partner_id.write(vals)
+                vals[field_name] = new_val
+
+        if vals:
+            # Filtrar campos que no existen en res.partner para evitar KeyError
+            partner_fields = self.env["res.partner"]._fields
+            invalid_fields = [f for f in vals if f not in partner_fields]
+            for f in invalid_fields:
+                _logger.warning(
+                    "Campo '%s' no existe en res.partner, se omite de la escritura",
+                    f,
+                )
+            vals = {k: v for k, v in vals.items() if k in partner_fields}
+
+        if vals:
+            self.partner_id.write(vals)
+
+            # Retornar acción para cerrar wizard y recargar el partner
+            return {
+                "type": "ir.actions.act_window_close",
+                "infos": {"partner_updated": True, "partner_id": self.partner_id.id},
+            }
+        else:
+            return {"type": "ir.actions.act_window_close"}
 
     def automatic_process_cb(self):
         for partner in self.partner_ids:
