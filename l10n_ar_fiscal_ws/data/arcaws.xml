@@ -41,7 +41,7 @@
     "token": connection.token,
     "sign": connection.sign,
     "cuitRepresentada": int(company_id.partner_id.ensure_vat()),
-    "idPersona": [int(cuit) for cuit in extra_values.get('cuit_list', [self.ensure_vat()])],
+    "idPersona": [int(cuit) para cuit en ( valores_extra o {}) .get('cuit_list', [self.ensure_vat()])],
 }</field>
         <field name="response_dict"></field>
     </record>
